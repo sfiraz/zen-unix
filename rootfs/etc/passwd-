@@ -15,4 +15,3 @@ games:x:35:35:games:/usr/games:/sbin/nologin
 ntp:x:123:123:NTP:/var/empty:/sbin/nologin
 guest:x:405:100:guest:/dev/null:/sbin/nologin
 nobody:x:65534:65534:nobody:/:/sbin/nologin
-klogd:x:100:101:klogd:/dev/null:/sbin/nologin

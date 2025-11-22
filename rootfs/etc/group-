@@ -33,4 +33,4 @@ utmp:x:406:
 ping:x:999:
 nogroup:x:65533:
 nobody:x:65534:
-klogd:x:101:klogd
+klogd:x:101:
