@@ -1,0 +1,39 @@
+# Virtual filesystems - NEVER include these!
+rootfs/proc/
+rootfs/sys/
+rootfs/dev/
+rootfs/run/
+
+# Temporary directories
+rootfs/tmp/
+rootfs/var/tmp/
+rootfs/var/run/
+
+# Package manager files
+.PKGINFO
+.SIGN.RSA.*
+
+# Cache and temporary files
+*.swp
+*.tmp
+*.log
+.cache/
+
+# Backup files
+*~
+*.bak
+*.old
+
+# macOS files
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System-specific files
+rootfs/etc/.pwd.lock
+rootfs/var/cache/
+rootfs/var/lock/
