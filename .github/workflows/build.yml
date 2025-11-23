@@ -1,0 +1,48 @@
+name: Build Zen Unix
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          crossbuild-essential-arm64 \
+          libncurses5-dev \
+          bc \
+          git \
+          wget
+        
+    - name: Build Kernel
+      run: |
+        chmod +x scripts/build-kernel.sh
+        ./scripts/build-kernel.sh
+        
+    - name: Build BusyBox
+      run: |
+        chmod +x scripts/build-busybox.sh
+        ./scripts/build-busybox.sh
+        
+    - name: Package artifacts
+      run: |
+        mkdir -p release
+        cp linux/arch/arm64/boot/Image release/
+        cp -r busybox/_install/* release/
+        tar -czf zen-unix-arm64-$(date +%Y%m%d).tar.gz release/
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: zen-unix-arm64
+        path: *.tar.gz
