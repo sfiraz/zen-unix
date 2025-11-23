@@ -3,9 +3,9 @@ set -e
 
 echo "Building Zen Shell system..."
 
-# Build Zen Shell dari workspase folder
+# Build Zen Shell dari root directory
 echo "Compiling Zen Shell..."
-aarch64-linux-gnu-gcc -static -Os -o ../rootfs/rootfs.dir/bin/zen ../.github/workspase/zen.c
+aarch64-linux-gnu-gcc -static -Os -o ../rootfs/rootfs.dir/bin/zen ../../zen.c
 
 # Buat init script
 cat > ../rootfs/rootfs.dir/init << 'EOF'
