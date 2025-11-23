@@ -6,11 +6,11 @@ echo "Building BusyBox for ARM64..."
 mkdir -p toolchain
 cd toolchain
 
-# Download dari kernel.org mirror (lebih reliable)
-wget https://cdn.kernel.org/pub/linux/utils/busybox/busybox-1.36.1.tar.bz2
+# Download dari URL yang benar
+wget https://busybox.net/downloads/busybox-1.36.1.tar.bz2 --no-check-certificate
 
-# Atau dari Alpine mirror
-# wget http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/busybox-1.37.0-r0.apk
+# Atau dari mirror alternatif
+# wget http://distfiles.gentoo.org/distfiles/busybox-1.36.1.tar.bz2
 
 tar -xf busybox-1.36.1.tar.bz2
 cd busybox-1.36.1
