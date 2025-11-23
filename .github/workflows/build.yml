@@ -28,32 +28,6 @@ jobs:
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu
         
-    - name: Install Tools for ARM64
-      run: |
-        # Download tools langsung ke rootfs
-        mkdir -p rootfs/rootfs.dir/usr
-        
-        # Install Go
-        wget -q https://go.dev/dl/go1.25.4.linux-arm64.tar.gz
-        tar -xf go1.25.4.linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
-        
-        # Install Node.js
-        wget -q https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-arm64.tar.xz
-        tar -xf node-v20.18.0-linux-arm64.tar.xz -C rootfs/rootfs.dir/usr/
-        
-        # Install Neovim
-        wget -q https://github.com/neovim/neovim/releases/download/stable/nvim-linux-arm64.tar.gz
-        tar -xf nvim-linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
-        
-        # Setup symlinks
-        cd rootfs/rootfs.dir/bin
-        ln -sf ../usr/nvim-linux-arm64/bin/nvim nvim
-        ln -sf ../usr/go/bin/go go
-        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/node node
-        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/npm npm
-        
-        echo "Tools installed successfully"
-        
     - name: Build MUSL
       run: |
         chmod +x scripts/build-musl.sh
@@ -73,6 +47,27 @@ jobs:
       run: |
         chmod +x scripts/build-rootfs.sh
         ./scripts/build-rootfs.sh
+        
+    - name: Install Tools for ARM64
+      run: |
+        # Install tools SETELAH rootfs dibuat
+        wget -q https://go.dev/dl/go1.25.4.linux-arm64.tar.gz
+        tar -xf go1.25.4.linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
+        
+        wget -q https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-arm64.tar.xz
+        tar -xf node-v20.18.0-linux-arm64.tar.xz -C rootfs/rootfs.dir/usr/
+        
+        wget -q https://github.com/neovim/neovim/releases/download/stable/nvim-linux-arm64.tar.gz
+        tar -xf nvim-linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
+        
+        # Setup symlinks
+        cd rootfs/rootfs.dir/bin
+        ln -sf ../usr/nvim-linux-arm64/bin/nvim nvim
+        ln -sf ../usr/go/bin/go go
+        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/node node
+        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/npm npm
+        
+        echo "Tools installed successfully"
         
     - name: Build Init System
       run: |
