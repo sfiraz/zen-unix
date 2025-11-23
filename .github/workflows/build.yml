@@ -48,27 +48,6 @@ jobs:
         chmod +x scripts/build-rootfs.sh
         ./scripts/build-rootfs.sh
         
-    - name: Install Tools for ARM64
-      run: |
-        # Install tools SETELAH rootfs dibuat
-        wget -q https://go.dev/dl/go1.25.4.linux-arm64.tar.gz
-        tar -xf go1.25.4.linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
-        
-        wget -q https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-arm64.tar.xz
-        tar -xf node-v20.18.0-linux-arm64.tar.xz -C rootfs/rootfs.dir/usr/
-        
-        wget -q https://github.com/neovim/neovim/releases/download/stable/nvim-linux-arm64.tar.gz
-        tar -xf nvim-linux-arm64.tar.gz -C rootfs/rootfs.dir/usr/
-        
-        # Setup symlinks
-        cd rootfs/rootfs.dir/bin
-        ln -sf ../usr/nvim-linux-arm64/bin/nvim nvim
-        ln -sf ../usr/go/bin/go go
-        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/node node
-        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/npm npm
-        
-        echo "Tools installed successfully"
-        
     - name: Build Init System
       run: |
         chmod +x scripts/build-init.sh
