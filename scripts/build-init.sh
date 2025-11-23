@@ -3,6 +3,8 @@ set -e
 
 echo "Building Zen Shell system..."
 
+# Buat folder system jika belum ada
+mkdir -p system
 cd system
 
 # Build Zen Shell
