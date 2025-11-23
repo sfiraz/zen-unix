@@ -1,0 +1,5 @@
+toolchain/
+rootfs/rootfs.dir
+output/mnt
+*.img
+*.tar.gz

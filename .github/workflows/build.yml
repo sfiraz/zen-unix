@@ -3,7 +3,7 @@ name: Build Zen Unix
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
@@ -22,7 +22,14 @@ jobs:
           libncurses5-dev \
           bc \
           git \
-          wget
+          wget \
+          qemu-utils \
+          dosfstools
+        
+    - name: Build MUSL
+      run: |
+        chmod +x scripts/build-musl.sh
+        ./scripts/build-musl.sh
         
     - name: Build Kernel
       run: |
@@ -34,15 +41,23 @@ jobs:
         chmod +x scripts/build-busybox.sh
         ./scripts/build-busybox.sh
         
-    - name: Package artifacts
+    - name: Build RootFS
       run: |
-        mkdir -p release
-        cp linux/arch/arm64/boot/Image release/
-        cp -r busybox/_install/* release/
-        tar -czf zen-unix-arm64-$(date +%Y%m%d).tar.gz release/
+        chmod +x scripts/build-rootfs.sh
+        ./scripts/build-rootfs.sh
         
-    - name: Upload build artifacts
+    - name: Build Init System
+      run: |
+        chmod +x scripts/build-init.sh
+        ./scripts/build-init.sh
+        
+    - name: Create Disk Image
+      run: |
+        chmod +x scripts/create-image.sh
+        ./scripts/create-image.sh
+        
+    - name: Upload artifacts
       uses: actions/upload-artifact@v3
       with:
         name: zen-unix-arm64
-        path: *.tar.gz
+        path: output/
