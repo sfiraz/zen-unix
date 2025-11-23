@@ -5,17 +5,18 @@
 #include <sys/wait.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #define MAX_INPUT 1024
 
 void show_logo() {
     printf("\n");
-    printf(COLOR_CYAN "    ███████╗███████╗███╗   ██╗" COLOR_RESET "    " COLOR_GREEN "┌──────────────┐\n" COLOR_RESET);
-    printf(COLOR_CYAN "    ╚══███╔╝██╔════╝████╗  ██║" COLOR_RESET "    " COLOR_GREEN "│" COLOR_YELLOW " Zen Unix     " COLOR_GREEN "│\n" COLOR_RESET);
-    printf(COLOR_CYAN "      ███╔╝ █████╗  ██╔██╗ ██║" COLOR_RESET "    " COLOR_GREEN "│" COLOR_YELLOW " ARM64        " COLOR_GREEN "│\n" COLOR_RESET);
-    printf(COLOR_CYAN "     ███╔╝  ██╔══╝  ██║╚██╗██║" COLOR_RESET "    " COLOR_GREEN "│" COLOR_YELLOW " Minimal      " COLOR_GREEN "│\n" COLOR_RESET);
-    printf(COLOR_CYAN "    ███████╗███████╗██║ ╚████║" COLOR_RESET "    " COLOR_GREEN "│" COLOR_YELLOW " v0.1         " COLOR_GREEN "│\n" COLOR_RESET);
-    printf(COLOR_CYAN "    ╚══════╝╚══════╝╚═╝  ╚═══╝" COLOR_RESET "    " COLOR_GREEN "└──────────────┘\n" COLOR_RESET);
+    printf("    ███████╗███████╗███╗   ██╗    ┌──────────────┐\n");
+    printf("    ╚══███╔╝██╔════╝████╗  ██║    │ Zen Unix     │\n");
+    printf("      ███╔╝ █████╗  ██╔██╗ ██║    │ ARM64        │\n");
+    printf("     ███╔╝  ██╔══╝  ██║╚██╗██║    │ Minimal      │\n");
+    printf("    ███████╗███████╗██║ ╚████║    │ v0.1         │\n");
+    printf("    ╚══════╝╚══════╝╚═╝  ╚═══╝    └──────────────┘\n");
     printf("\n");
 }
 
@@ -37,7 +38,7 @@ void shell() {
     char input[MAX_INPUT];
     char cwd[256];
     
-    printf(COLOR_GREEN "Zen Shell" COLOR_RESET " - Type 'exit' to quit\n");
+    printf("Zen Shell - Type 'exit' to quit\n");
     
     setup_environment();
     
@@ -46,7 +47,7 @@ void shell() {
         getcwd(cwd, sizeof(cwd));
         
         // Show prompt dengan path
-        printf(COLOR_MAGENTA "☯ " COLOR_CYAN "%s" COLOR_MAGENTA " $ " COLOR_RESET, cwd);
+        printf("☯ %s $ ", cwd);
         fflush(stdout);
         
         if (!fgets(input, MAX_INPUT, stdin)) {
@@ -68,7 +69,7 @@ void shell() {
         if (strncmp(input, "cd ", 3) == 0) {
             char *path = input + 3;
             if (chdir(path) != 0) {
-                printf(COLOR_RED "cd: %s: No such directory\n" COLOR_RESET, path);
+                printf("cd: %s: No such directory\n", path);
             }
             continue;
         }
@@ -76,12 +77,12 @@ void shell() {
         pid_t pid = fork();
         if (pid == 0) {
             execl("/bin/sh", "sh", "-c", input, NULL);
-            printf(COLOR_RED "Command failed: %s\n" COLOR_RESET, input);
+            printf("Command failed: %s\n", input);
             exit(1);
         } else if (pid > 0) {
             wait(NULL);
         } else {
-            printf(COLOR_RED "Fork failed\n" COLOR_RESET);
+            printf("Fork failed\n");
         }
         
         printf("\n");
@@ -91,6 +92,6 @@ void shell() {
 int main() {
     show_logo();
     shell();
-    printf(COLOR_GREEN "Goodbye!\n" COLOR_RESET);
+    printf("Goodbye!\n");
     return 0;
 }
