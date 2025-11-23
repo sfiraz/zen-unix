@@ -28,13 +28,29 @@ jobs:
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu
         
-    - name: Install Go ARM64
+    - name: Install Tools for ARM64
       run: |
+        # Download dan extract tools untuk ARM64
+        cd toolchain
+        
+        # Install Go
         wget https://go.dev/dl/go1.25.4.linux-arm64.tar.gz
-        sudo tar -C /usr/local -xzf go1.25.4.linux-arm64.tar.gz
-        echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
-        echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
-        echo "/usr/local/go/bin:/home/runner/go/bin" >> $GITHUB_PATH
+        tar -xf go1.25.4.linux-arm64.tar.gz -C ../rootfs/rootfs.dir/usr/
+        
+        # Install Node.js
+        wget https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-arm64.tar.xz
+        tar -xf node-v20.18.0-linux-arm64.tar.xz -C ../rootfs/rootfs.dir/usr/
+        
+        # Install Neovim
+        wget https://github.com/neovim/neovim/releases/download/stable/nvim-linux-arm64.tar.gz
+        tar -xf nvim-linux-arm64.tar.gz -C ../rootfs/rootfs.dir/usr/
+        
+        # Setup symlinks
+        cd ../rootfs/rootfs.dir/bin
+        ln -sf ../usr/nvim-linux-arm64/bin/nvim nvim
+        ln -sf ../usr/go/bin/go go
+        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/node node
+        ln -sf ../usr/node-v20.18.0-linux-arm64/bin/npm npm
         
     - name: Build MUSL
       run: |
@@ -60,26 +76,6 @@ jobs:
       run: |
         chmod +x scripts/build-init.sh
         ./scripts/build-init.sh
-        
-    - name: Install Additional Tools
-      run: |
-        chmod +x scripts/install-tools.sh
-        ./scripts/install-tools.sh
-        
-    - name: Install Compression Tools
-      run: |
-        chmod +x scripts/compression-tools.sh
-        ./scripts/compression-tools.sh
-        
-    - name: Install Android Tools
-      run: |
-        chmod +x scripts/android-tools.sh
-        ./scripts/android-tools.sh
-        
-    - name: Setup Neovim
-      run: |
-        chmod +x scripts/setup-nvim.sh
-        ./scripts/setup-nvim.sh
         
     - name: Create Disk Image
       run: |
