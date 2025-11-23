@@ -24,7 +24,17 @@ jobs:
           git \
           wget \
           qemu-utils \
-          dosfstools
+          dosfstools \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu
+        
+    - name: Install Go ARM64
+      run: |
+        wget https://go.dev/dl/go1.25.4.linux-arm64.tar.gz
+        sudo tar -C /usr/local -xzf go1.25.4.linux-arm64.tar.gz
+        echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
+        echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
+        echo "/usr/local/go/bin:/home/runner/go/bin" >> $GITHUB_PATH
         
     - name: Build MUSL
       run: |
@@ -50,6 +60,26 @@ jobs:
       run: |
         chmod +x scripts/build-init.sh
         ./scripts/build-init.sh
+        
+    - name: Install Additional Tools
+      run: |
+        chmod +x scripts/install-tools.sh
+        ./scripts/install-tools.sh
+        
+    - name: Install Compression Tools
+      run: |
+        chmod +x scripts/compression-tools.sh
+        ./scripts/compression-tools.sh
+        
+    - name: Install Android Tools
+      run: |
+        chmod +x scripts/android-tools.sh
+        ./scripts/android-tools.sh
+        
+    - name: Setup Neovim
+      run: |
+        chmod +x scripts/setup-nvim.sh
+        ./scripts/setup-nvim.sh
         
     - name: Create Disk Image
       run: |

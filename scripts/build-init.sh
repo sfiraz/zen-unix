@@ -1,27 +1,32 @@
 #!/bin/bash
 set -e
 
-echo "Building simple init system..."
+echo "Building Zen Shell system..."
 
-mkdir -p system
 cd system
 
-cat > simpleinit.c << 'EOF'
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+# Build Zen Shell
+echo "Compiling Zen Shell..."
+aarch64-linux-gnu-gcc -static -Os -o zen ../../zen.c
 
-int main() {
-    printf("Zen Unix - Minimal Init System\n");
-    system("mount -t proc none /proc");
-    system("mount -t sysfs none /sys"); 
-    system("mount -t devtmpfs none /dev");
-    execl("/bin/sh", "sh", NULL);
-    return 0;
-}
+# Copy Zen Shell ke rootfs
+cp zen ../rootfs/rootfs.dir/bin/
+
+# Buat init script yang jalankan Zen Shell
+cat > ../rootfs/rootfs.dir/init << 'EOF'
+#!/bin/sh
+
+# Mount filesystems
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+echo "Booting Zen Unix..."
+
+# Jalankan Zen Shell sebagai main shell
+exec /bin/zen
 EOF
 
-aarch64-linux-gnu-gcc -static -o simpleinit simpleinit.c
-cp simpleinit ../rootfs/rootfs.dir/init
+chmod +x ../rootfs/rootfs.dir/init
 
-echo "Init system built"
+echo "Zen Shell system built"
