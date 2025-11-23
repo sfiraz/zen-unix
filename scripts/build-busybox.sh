@@ -6,7 +6,12 @@ echo "Building BusyBox for ARM64..."
 mkdir -p toolchain
 cd toolchain
 
-wget https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+# Download dari kernel.org mirror (lebih reliable)
+wget https://cdn.kernel.org/pub/linux/utils/busybox/busybox-1.36.1.tar.bz2
+
+# Atau dari Alpine mirror
+# wget http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/busybox-1.37.0-r0.apk
+
 tar -xf busybox-1.36.1.tar.bz2
 cd busybox-1.36.1
 
@@ -18,7 +23,7 @@ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
 sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
 
 # DISABLE problematic features
-sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' .config  # Disable traffic control
+sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' .config
 sed -i 's/CONFIG_FEATURE_MOUNT_NFS=y/# CONFIG_FEATURE_MOUNT_NFS is not set/' .config
 sed -i 's/CONFIG_UDHCPC=y/# CONFIG_UDHCPC is not set/' .config
 sed -i 's/CONFIG_UDHCPD=y/# CONFIG_UDHCPD is not set/' .config
