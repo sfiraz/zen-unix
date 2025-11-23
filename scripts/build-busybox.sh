@@ -6,11 +6,8 @@ echo "Building BusyBox for ARM64..."
 mkdir -p toolchain
 cd toolchain
 
-# Download dari URL yang benar
-wget https://busybox.net/downloads/busybox-1.36.1.tar.bz2 --no-check-certificate
-
-# Atau dari mirror alternatif
-# wget http://distfiles.gentoo.org/distfiles/busybox-1.36.1.tar.bz2
+# Download dengan skip SSL verification
+wget --no-check-certificate https://busybox.net/downloads/busybox-1.36.1.tar.bz2
 
 tar -xf busybox-1.36.1.tar.bz2
 cd busybox-1.36.1
