@@ -8,7 +8,7 @@ cd output
 rm -f zen-unix.img
 
 # Naikkan size jadi 256MB
-dd if=/dev/zero of=zen-unix.img bs=1M count=256
+dd if=/dev/zero of=zen-unix.img bs=1M count=64
 mkfs.ext4 zen-unix.img
 
 mkdir -p mnt
