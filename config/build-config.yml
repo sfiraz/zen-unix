@@ -1,0 +1,22 @@
+# Zen Unix Build Configuration
+target_arch: "arm64"
+cross_compile: "aarch64-linux-gnu-"
+
+versions:
+  kernel: "6.6.9"
+  busybox: "1.36.1"
+  musl: "1.2.4"
+  go: "1.21.6"
+  neovim: "0.9.5"
+
+features:
+  static_binaries: true
+  development_tools: true
+  cli_only: true
+
+build_options:
+  kernel:
+    config: "defconfig"
+    modules: false
+  busybox:
+    static: true
