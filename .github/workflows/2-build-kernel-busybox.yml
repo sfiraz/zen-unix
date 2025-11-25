@@ -12,7 +12,7 @@ jobs:
     
     steps:
     - name: Download toolchain
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: toolchain-arm64
         path: toolchain
@@ -65,8 +65,8 @@ mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 echo ""
 
-echo "🐧 Welcome to Zen Unix - Wildan Distro!"
-echo "📱 ARM64 Linux by Wildan Hermawan (14yo)"
+echo " Welcome to Zen Unix - Wildan Distro!"
+echo "ARM64 Linux by Wildan Hermawan "
 echo ""
 
 exec /bin/sh
@@ -83,7 +83,7 @@ EOF
         sudo umount mnt
 
     - name: Upload rootfs image
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: zen-unix-rootfs
         path: |
