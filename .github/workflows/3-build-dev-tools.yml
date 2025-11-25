@@ -1,0 +1,85 @@
+name: "[3] Build Development Tools"
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["[2] Build Kernel + Busybox RootFS"]
+    types: [completed]
+
+jobs:
+  build-dev-tools:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download rootfs
+      uses: actions/download-artifact@v3
+      with:
+        name: zen-unix-rootfs
+        path: distro
+
+    - name: Build Go for ARM64
+      run: |
+        tar xf sources/go1.21.6.src.tar.gz
+        cd go/src
+        export CGO_ENABLED=1
+        export GOOS=linux
+        export GOARCH=arm64
+        export CC=aarch64-linux-gnu-gcc
+        ./make.bash
+        cd ../..
+
+    - name: Build Neovim
+      run: |
+        tar xf sources/neovim-v0.9.5.tar.gz
+        cd neovim-0.9.5
+        mkdir build && cd build
+        cmake .. \
+          -DCMAKE_SYSTEM_NAME=Linux \
+          -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+          -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+          -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+          -DCMAKE_INSTALL_PREFIX=/usr
+        make -j$(nproc)
+        make DESTDIR=$PWD/install install
+        cd ../..
+
+    - name: Build essential tools
+      run: |
+        # Build tmux
+        tar xf sources/tmux-3.3a.tar.gz
+        cd tmux-3.3a
+        ./configure --host=aarch64-linux-gnu --prefix=/usr
+        make -j$(nproc)
+        make DESTDIR=$PWD/install install
+        cd ..
+
+        # Build curl
+        tar xf sources/curl-8.5.0.tar.xz
+        cd curl-8.5.0
+        ./configure --host=aarch64-linux-gnu --prefix=/usr --with-openssl
+        make -j$(nproc)
+        make DESTDIR=$PWD/install install
+        cd ..
+
+    - name: Package final distro
+      run: |
+        mkdir -p zen-unix-final
+        cp distro/zen-unix.img zen-unix-final/
+        cp distro/Image zen-unix-final/
+        cp -r go/bin/go-linux-arm64 zen-unix-final/go
+        cp -r neovim-0.9.5/build/install/* zen-unix-final/
+        cp -r tmux-3.3a/install/* zen-unix-final/
+        cp -r curl-8.5.0/install/* zen-unix-final/
+
+        # Create installation guide
+        cat > zen-unix-final/INSTALL.md << 'EOF'
+# 🐧 Zen Unix Installation Guide
+
+## Requirements
+- ARM64 device (Phone, Raspberry Pi, etc)
+- MicroSD card or USB drive (min 128MB)
+
+## Installation
+1. Flash `zen-unix.img` to SD card:
+   ```bash
+   dd if=zen-unix.img of=/dev/sdX bs=4M status=progress
