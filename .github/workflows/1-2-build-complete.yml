@@ -1,0 +1,126 @@
+name: "[1+2] Build Complete Toolchain + Kernel RootFS"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-complete:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup ARM64 environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          build-essential \
+          libncurses-dev \
+          bc \
+          flex \
+          bison \
+          libssl-dev \
+          libelf-dev \
+          wget \
+          curl \
+          xz-utils
+
+    - name: Download sources
+      run: |
+        chmod +x scripts/download-sources.sh
+        ./scripts/download-sources.sh
+
+    # ========== PHASE 1: TOOLCHAIN ==========
+    - name: Build Binutils
+      run: |
+        tar xf sources/binutils-2.42.tar.xz
+        cd binutils-2.42
+        mkdir build && cd build
+        ../configure --target=aarch64-linux-gnu --prefix=/usr --disable-werror
+        make -j$(nproc)
+        make DESTDIR=$PWD/install install
+        cd ../..
+
+    - name: Build Linux Kernel Headers
+      run: |
+        tar xf sources/linux-6.6.9.tar.xz
+        cd linux-6.6.9
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- headers_install
+        cd ..
+
+    # ========== PHASE 2: KERNEL + ROOTFS ==========
+    - name: Build Linux Kernel
+      run: |
+        cd linux-6.6.9
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+        cd ..
+
+    - name: Build musl libc
+      run: |
+        tar xf sources/musl-1.2.4.tar.gz
+        cd musl-1.2.4
+        ./configure --prefix=/usr --target=aarch64-linux-gnu
+        make -j$(nproc)
+        make DESTDIR=$PWD/install install
+        cd ..
+
+    - name: Build BusyBox
+      run: |
+        tar xf sources/busybox-1.36.1.tar.bz2
+        cd busybox-1.36.1
+        make CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        echo "CONFIG_STATIC=y" >> .config
+        make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+        cd ..
+
+    - name: Create minimal rootfs
+      run: |
+        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,tmp,home}
+        cp busybox-1.36.1/busybox rootfs/bin/
+        cp -r musl-1.2.4/install/usr/lib/* rootfs/usr/lib/
+        
+        # Create busybox symlinks
+        cd rootfs/bin
+        for app in $(./busybox --list); do
+          ln -s busybox $app
+        done
+        cd ../..
+
+    - name: Create init script
+      run: |
+        # Create init script without heredoc
+        echo '#!/bin/sh' > rootfs/init
+        echo 'mount -t proc none /proc' >> rootfs/init
+        echo 'mount -t sysfs none /sys' >> rootfs/init
+        echo 'mount -t devtmpfs none /dev' >> rootfs/init
+        echo 'echo ""' >> rootfs/init
+        echo 'echo "🐧 Welcome to Zen Unix - Wildan Distro!"' >> rootfs/init
+        echo 'echo "📱 ARM64 Linux by Wildan Hermawan"' >> rootfs/init
+        echo 'echo ""' >> rootfs/init
+        echo 'exec /bin/sh' >> rootfs/init
+        chmod +x rootfs/init
+
+    - name: Create bootable image
+      run: |
+        dd if=/dev/zero of=zen-unix.img bs=1M count=128
+        mkfs.ext4 zen-unix.img
+        mkdir -p mnt
+        sudo mount -o loop zen-unix.img mnt
+        sudo cp -r rootfs/* mnt/
+        sudo umount mnt
+
+    - name: Upload final image
+      uses: actions/upload-artifact@v4
+      with:
+        name: zen-unix-complete
+        path: |
+          zen-unix.img
+          linux-6.6.9/arch/arm64/boot/Image
