@@ -1,7 +1,7 @@
 # 🐧 Zen Unix - Custom ARM64 Linux Distro
 
-**Built by Wildan Hermawan **
-*Minimal CLI-focused Linux distro for ARM64 development*
+Built by Wildan Hermawan
+Minimal CLI-focused Linux distro for ARM64 development
 
 ## 🎯 Features
 - 🐹 **Go Language** pre-installed
