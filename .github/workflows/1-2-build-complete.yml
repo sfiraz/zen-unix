@@ -61,18 +61,13 @@ jobs:
     - name: Build Linux Kernel (Optimized)
       run: |
         cd linux-6.6.9
-        
-        # Optimize kernel config for faster build
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # Disable unnecessary drivers to speed up build
+        # Optimasi kernel
         ./scripts/config --set-val CONFIG_MODULES n
-        ./scripts/config --set-val CONFIG_INITRAMFS_SOURCE ""
         ./scripts/config --set-val CONFIG_DEBUG_INFO n
         ./scripts/config --set-val CONFIG_DEBUG_KERNEL n
-        ./scripts/config --set-val CONFIG_PRINTK_TIME n
         
-        # Build kernel
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
 
@@ -85,173 +80,24 @@ jobs:
         make DESTDIR=$PWD/install install
         cd ..
 
-    - name: Build BusyBox (Fixed - No Networking)
+    - name: Build BusyBox (Non-Interactive Fix)
       run: |
         tar xf sources/busybox-1.36.1.tar.bz2
         cd busybox-1.36.1
         
-        # Create minimal config to avoid networking errors
-        make allnoconfig
+        # Pakai defconfig dan disable interactive features
+        make CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # Essential utilities only
-        echo "CONFIG_STATIC=y" > .config
-        echo "CONFIG_SHELL_HUSH=y" >> .config
-        echo "CONFIG_ASH=y" >> .config
-        echo "CONFIG_ASH_BUILTINS=y" >> .config
-        echo "CONFIG_ASH_OPTIMIZE_FOR_SIZE=y" >> .config
-        echo "CONFIG_MKDIR=y" >> .config
-        echo "CONFIG_LS=y" >> .config
-        echo "CONFIG_CP=y" >> .config
-        echo "CONFIG_MV=y" >> .config
-        echo "CONFIG_RM=y" >> .config
-        echo "CONFIG_ECHO=y" >> .config
-        echo "CONFIG_CAT=y" >> .config
-        echo "CONFIG_MOUNT=y" >> .config
-        echo "CONFIG_UMOUNT=y" >> .config
-        echo "CONFIG_SH=y" >> .config
-        echo "CONFIG_CHMOD=y" >> .config
-        echo "CONFIG_CHOWN=y" >> .config
-        echo "CONFIG_DF=y" >> .config
-        echo "CONFIG_FREE=y" >> .config
-        echo "CONFIG_GREP=y" >> .config
-        echo "CONFIG_LN=y" >> .config
-        echo "CONFIG_PS=y" >> .config
-        echo "CONFIG_PWD=y" >> .config
-        echo "CONFIG_SLEEP=y" >> .config
-        echo "CONFIG_SYNC=y" >> .config
-        echo "CONFIG_TAR=y" >> .config
-        echo "CONFIG_TOUCH=y" >> .config
-        echo "CONFIG_UNAME=y" >> .config
-        echo "CONFIG_WHICH=y" >> .config
-        echo "CONFIG_WHOAMI=y" >> .config
+        # Automated config changes - no interactive prompts
+        ./scripts/config --set-val CONFIG_STATIC y
+        ./scripts/config --set-val CONFIG_DESKTOP n
+        ./scripts/config --undefine CONFIG_FEATURE_IPV6
+        ./scripts/config --undefine CONFIG_TC
+        ./scripts/config --undefine CONFIG_IP
+        ./scripts/config --undefine CONFIG_NETWORKING
         
-        # DISABLE problematic networking features
-        echo "# CONFIG_NETWORKING is not set" >> .config
-        echo "# CONFIG_FEATURE_IPV6 is not set" >> .config
-        echo "# CONFIG_FEATURE_UNIX_LOCAL is not set" >> .config
-        echo "# CONFIG_FEATURE_PREFER_IPV4_ADDRESS is not set" >> .config
-        echo "# CONFIG_VERBOSE_RESOLUTION_ERRORS is not set" >> .config
-        echo "# CONFIG_ARP is not set" >> .config
-        echo "# CONFIG_ARPING is not set" >> .config
-        echo "# CONFIG_BRCTL is not set" >> .config
-        echo "# CONFIG_FEATURE_BRCTL_FANCY is not set" >> .config
-        echo "# CONFIG_FEATURE_BRCTL_SHOW is not set" >> .config
-        echo "# CONFIG_DNSDOMAINNAME is not set" >> .config
-        echo "# CONFIG_ETHER_WAKE is not set" >> .config
-        echo "# CONFIG_FTPD is not set" >> .config
-        echo "# CONFIG_FEATURE_FTPD_WRITE is not set" >> .config
-        echo "# CONFIG_FEATURE_FTPD_ACCEPT_BROKEN_LIST is not set" >> .config
-        echo "# CONFIG_FEATURE_FTPD_AUTHENTICATION is not set" >> .config
-        echo "# CONFIG_FTPGET is not set" >> .config
-        echo "# CONFIG_FTPPUT is not set" >> .config
-        echo "# CONFIG_FEATURE_FTPGETPUT_LONG_OPTIONS is not set" >> .config
-        echo "# CONFIG_HOSTNAME is not set" >> .config
-        echo "# CONFIG_HTTPD is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_RANGES is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_SETUID is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_BASIC_AUTH is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_AUTH_MD5 is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_CGI is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_ENCODE_URL_STR is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_ERROR_PAGES is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_PROXY is not set" >> .config
-        echo "# CONFIG_FEATURE_HTTPD_GZIP is not set" >> .config
-        echo "# CONFIG_IFCONFIG is not set" >> .config
-        echo "# CONFIG_FEATURE_IFCONFIG_STATUS is not set" >> .config
-        echo "# CONFIG_FEATURE_IFCONFIG_SLIP is not set" >> .config
-        echo "# CONFIG_FEATURE_IFCONFIG_MEMSTART_IOADDR_IRQ is not set" >> .config
-        echo "# CONFIG_FEATURE_IFCONFIG_HW is not set" >> .config
-        echo "# CONFIG_FEATURE_IFCONFIG_BROADCAST_PLUS is not set" >> .config
-        echo "# CONFIG_IFENSLAVE is not set" >> .config
-        echo "# CONFIG_IFPLUGD is not set" >> .config
-        echo "# CONFIG_IFUPDOWN is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IP is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IPV6 is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IP_BUILTIN is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IFCONFIG_BUILTIN is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IPV4 is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_IPV6 is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_MAPPING is not set" >> .config
-        echo "# CONFIG_FEATURE_IFUPDOWN_EXTERNAL_DHCP is not set" >> .config
-        echo "# CONFIG_INETD is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_ECHO is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_DISCARD is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_TIME is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_DAYTIME is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_CHARGEN is not set" >> .config
-        echo "# CONFIG_FEATURE_INETD_RPC is not set" >> .config
-        echo "# CONFIG_IP is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_ADDRESS is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_LINK is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_ROUTE is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_ROUTE_DIR is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_TUNNEL is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_RULE is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_SHORT_FORMS is not set" >> .config
-        echo "# CONFIG_FEATURE_IP_RARE_PROTOCOLS is not set" >> .config
-        echo "# CONFIG_IPADDR is not set" >> .config
-        echo "# CONFIG_IPLINK is not set" >> .config
-        echo "# CONFIG_IPROUTE is not set" >> .config
-        echo "# CONFIG_IPTUNNEL is not set" >> .config
-        echo "# CONFIG_IPRULE is not set" >> .config
-        echo "# CONFIG_IPCALC is not set" >> .config
-        echo "# CONFIG_FEATURE_IPCALC_FANCY is not set" >> .config
-        echo "# CONFIG_FEATURE_IPCALC_LONG_OPTIONS is not set" >> .config
-        echo "# CONFIG_NAMEIF is not set" >> .config
-        echo "# CONFIG_FEATURE_NAMEIF_EXTENDED is not set" >> .config
-        echo "# CONFIG_NBDCLIENT is not set" >> .config
-        echo "# CONFIG_NC is not set" >> .config
-        echo "# CONFIG_NC_SERVER is not set" >> .config
-        echo "# CONFIG_NC_EXTRA is not set" >> .config
-        echo "# CONFIG_NC_110_COMPAT is not set" >> .config
-        echo "# CONFIG_NETSTAT is not set" >> .config
-        echo "# CONFIG_FEATURE_NETSTAT_WIDE is not set" >> .config
-        echo "# CONFIG_FEATURE_NETSTAT_PRG is not set" >> .config
-        echo "# CONFIG_NSLOOKUP is not set" >> .config
-        echo "# CONFIG_NTPD is not set" >> .config
-        echo "# CONFIG_FEATURE_NTPD_SERVER is not set" >> .config
-        echo "# CONFIG_FEATURE_NTPD_CONF is not set" >> .config
-        echo "# CONFIG_PING is not set" >> .config
-        echo "# CONFIG_PING6 is not set" >> .config
-        echo "# CONFIG_FEATURE_FANCY_PING is not set" >> .config
-        echo "# CONFIG_PSCAN is not set" >> .config
-        echo "# CONFIG_ROUTE is not set" >> .config
-        echo "# CONFIG_SLATTACH is not set" >> .config
-        echo "# CONFIG_SSL_CLIENT is not set" >> .config
-        echo "# CONFIG_TC is not set" >> .config
-        echo "# CONFIG_TCPSVD is not set" >> .config
-        echo "# CONFIG_TELNET is not set" >> .config
-        echo "# CONFIG_FEATURE_TELNET_TTYPE is not set" >> .config
-        echo "# CONFIG_FEATURE_TELNET_AUTOLOGIN is not set" >> .config
-        echo "# CONFIG_TELNETD is not set" >> .config
-        echo "# CONFIG_FEATURE_TELNETD_STANDALONE is not set" >> .config
-        echo "# CONFIG_FEATURE_TELNETD_INETD_WAIT is not set" >> .config
-        echo "# CONFIG_TFTP is not set" >> .config
-        echo "# CONFIG_TFTPD is not set" >> .config
-        echo "# CONFIG_FEATURE_TFTP_GET is not set" >> .config
-        echo "# CONFIG_FEATURE_TFTP_PUT is not set" >> .config
-        echo "# CONFIG_FEATURE_TFTP_BLOCKSIZE is not set" >> .config
-        echo "# CONFIG_FEATURE_TFTP_PROGRESS_BAR is not set" >> .config
-        echo "# CONFIG_FEATURE_TFTP_HPA_COMPAT is not set" >> .config
-        echo "# CONFIG_TFTP_DEBUG is not set" >> .config
-        echo "# CONFIG_TRACEROUTE is not set" >> .config
-        echo "# CONFIG_TRACEROUTE6 is not set" >> .config
-        echo "# CONFIG_FEATURE_TRACEROUTE_VERBOSE is not set" >> .config
-        echo "# CONFIG_FEATURE_TRACEROUTE_SOURCE_ROUTE is not set" >> .config
-        echo "# CONFIG_FEATURE_TRACEROUTE_USE_ICMP is not set" >> .config
-        echo "# CONFIG_UDPSVD is not set" >> .config
-        echo "# CONFIG_VCONFIG is not set" >> .config
-        echo "# CONFIG_WGET is not set" >> .config
-        echo "# CONFIG_FEATURE_WGET_LONG_OPTIONS is not set" >> .config
-        echo "# CONFIG_FEATURE_WGET_STATUSBAR is not set" >> .config
-        echo "# CONFIG_FEATURE_WGET_AUTHENTICATION is not set" >> .config
-        echo "# CONFIG_FEATURE_WGET_TIMEOUT is not set" >> .config
-        echo "# CONFIG_FEATURE_WGET_HTTPS is not set" >> .config
-        echo "# CONFIG_WHOIS is not set" >> .config
-        echo "# CONFIG_ZCIP is not set" >> .config
-        
+        # Non-interactive build
+        make CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
 
@@ -270,7 +116,6 @@ jobs:
 
     - name: Create init script
       run: |
-        # Create init script without heredoc
         echo '#!/bin/sh' > rootfs/init
         echo 'mount -t proc none /proc' >> rootfs/init
         echo 'mount -t sysfs none /sys' >> rootfs/init
