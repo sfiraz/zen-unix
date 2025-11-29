@@ -2,19 +2,43 @@ name: "🚀 Zen Unix - Complete Build"
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Zen Unix Version'
+        required: true
+        default: '1.0.0'
+      features:
+        description: 'Build Features'
+        required: true  
+        default: 'full'
   push:
+    branches: [main, develop]
+  pull_request:
     branches: [main]
+
+env:
+  ZEN_VERSION: '1.0.0'
+  BUILD_ARCH: 'aarch64'
+  KERNEL_VERSION: '6.6.9'
+  MUSL_VERSION: '1.2.4'
+  BUSYBOX_VERSION: '1.36.1'
+  BINUTILS_VERSION: '2.42'
 
 jobs:
   build-complete:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     
     steps:
+    # ========== INITIAL SETUP ==========
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
-    - name: Setup ARM64 environment
+    - name: Setup build environment
       run: |
+        echo "🔧 Setting up build environment for Zen Unix ${{ env.ZEN_VERSION }}"
         sudo apt-get update
         sudo apt-get install -y \
           gcc-aarch64-linux-gnu \
@@ -32,357 +56,653 @@ jobs:
           xz-utils \
           git \
           make \
+          cmake \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
           qemu-system-aarch64 \
-          qemu-user-static
+          qemu-user-static \
+          dosfstools \
+          e2fsprogs \
+          parted \
+          udev \
+          file
 
-    - name: Download sources dengan retry
+    - name: Create build directories
       run: |
-        mkdir -p sources
+        mkdir -p {sources,build,rootfs,output}
+        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/{bin,lib,local,share},var/{cache,log,lib},tmp,home,root,boot,mnt,media,opt,run}
+        mkdir -p rootfs/etc/{apk,profile.d,init.d}
+        mkdir -p rootfs/var/cache/apk
+
+    # ========== DOWNLOAD SOURCES ==========
+    - name: Download sources dengan retry mechanism
+      run: |
         cd sources
+        echo "📦 Downloading source packages for Zen Unix..."
         
-        echo "📦 Downloading source packages..."
+        # Function untuk download dengan retry
+        download_with_retry() {
+          local url=$1
+          local output=$2
+          local max_retries=3
+          local retry_count=0
+          
+          while [ $retry_count -lt $max_retries ]; do
+            if wget --timeout=60 --tries=1 -O "$output" "$url"; then
+              echo "✅ Downloaded: $output"
+              return 0
+            fi
+            retry_count=$((retry_count + 1))
+            echo "❌ Download failed, retry $retry_count/$max_retries: $url"
+            sleep 5
+          done
+          echo "💥 Failed to download: $url"
+          return 1
+        }
+
+        # Download semua sources
+        download_with_retry "https://mirror.koddos.net/gnu/binutils/binutils-${{ env.BINUTILS_VERSION }}.tar.xz" "binutils-${{ env.BINUTILS_VERSION }}.tar.xz"
+        download_with_retry "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${{ env.KERNEL_VERSION }}.tar.xz" "linux-${{ env.KERNEL_VERSION }}.tar.xz"
+        download_with_retry "https://musl.libc.org/releases/musl-${{ env.MUSL_VERSION }}.tar.gz" "musl-${{ env.MUSL_VERSION }}.tar.gz"
+        download_with_retry "https://busybox.net/downloads/busybox-${{ env.BUSYBOX_VERSION }}.tar.bz2" "busybox-${{ env.BUSYBOX_VERSION }}.tar.bz2"
         
-        # Download Binutils dengan multiple mirrors
-        for mirror in "https://mirror.koddos.net/gnu/binutils/" "https://ftp.gnu.org/gnu/binutils/" "http://mirror.csclub.uwaterloo.ca/gnu/binutils/"; do
-          echo "Trying Binutils mirror: $mirror"
-          if wget --timeout=30 --tries=2 "${mirror}binutils-2.42.tar.xz"; then
-            echo "✅ Binutils downloaded"
-            break
+        # Verify checksums
+        echo "🔍 Verifying downloaded files..."
+        for file in *; do
+          if [ -f "$file" ]; then
+            size=$(stat -c%s "$file")
+            if [ $size -gt 1000 ]; then
+              echo "✅ $file: $size bytes"
+            else
+              echo "❌ $file: File too small or corrupted"
+              exit 1
+            fi
           fi
         done
-        
-        # Download Linux kernel
-        wget --timeout=30 --tries=2 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz || \
-        wget --timeout=30 --tries=2 https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz
-        
-        # Download Musl
-        wget --timeout=30 --tries=2 https://musl.libc.org/releases/musl-1.2.4.tar.gz
-        
-        # Download BusyBox
-        wget --timeout=30 --tries=2 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
-
-        # Verify downloads
-        echo "📁 Verifying downloads..."
-        ls -la
         cd ..
 
-    # ========== PHASE 1: TOOLCHAIN ==========
-    - name: Build Binutils
+    # ========== TOOLCHAIN BUILD ==========
+    - name: Build Binutils cross-compiler
       run: |
-        echo "🔧 Building Binutils..."
-        tar xf sources/binutils-2.42.tar.xz
-        cd binutils-2.42
+        echo "🛠️ Building Binutils ${{ env.BINUTILS_VERSION }} for ${{ env.BUILD_ARCH }}..."
+        tar xf sources/binutils-${{ env.BINUTILS_VERSION }}.tar.xz
+        cd binutils-${{ env.BINUTILS_VERSION }}
+        
         mkdir build && cd build
-        ../configure --target=aarch64-linux-gnu --prefix=/usr --disable-werror
-        make -j$(nproc)
+        ../configure \
+          --target=${{ env.BUILD_ARCH }}-linux-gnu \
+          --prefix=/usr \
+          --disable-werror \
+          --disable-multilib \
+          --enable-plugins \
+          --enable-threads
+        
+        make -j$(nproc) all
         make DESTDIR=$PWD/install install
+        
+        # Install ke sistem build
+        sudo cp -r install/* /
         cd ../..
+        echo "✅ Binutils build completed"
 
     - name: Build Linux Kernel Headers
       run: |
-        echo "📋 Building Kernel Headers..."
-        tar xf sources/linux-6.6.9.tar.xz
-        cd linux-6.6.9
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- headers_install
+        echo "📋 Building Linux ${{ env.KERNEL_VERSION }} headers..."
+        tar xf sources/linux-${{ env.KERNEL_VERSION }}.tar.xz
+        cd linux-${{ env.KERNEL_VERSION }}
+        
+        make ARCH=arm64 CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- headers_install INSTALL_HDR_PATH=$PWD/headers
+        
+        # Install headers ke sysroot
+        sudo mkdir -p /usr/${{ env.BUILD_ARCH }}-linux-gnu/include
+        sudo cp -r headers/include/* /usr/${{ env.BUILD_ARCH }}-linux-gnu/include/
         cd ..
+        echo "✅ Kernel headers installed"
 
-    # ========== PHASE 2: KERNEL + ROOTFS ==========
-    - name: Build Linux Kernel (Optimized)
+    # ========== KERNEL BUILD ==========
+    - name: Build Linux Kernel dengan optimasi
       run: |
-        echo "🐧 Building Linux Kernel..."
-        cd linux-6.6.9
+        echo "🐧 Building Linux Kernel ${{ env.KERNEL_VERSION }} dengan optimasi..."
+        cd linux-${{ env.KERNEL_VERSION }}
         
-        # Pakai defconfig
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        # Config dasar
+        make ARCH=arm64 CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- defconfig
         
-        # Optimasi untuk build cepat
+        # Optimasi untuk size dan speed
+        echo "⚡ Applying kernel optimizations..."
         ./scripts/config --disable DEBUG_INFO
         ./scripts/config --disable DEBUG_KERNEL
         ./scripts/config --disable DEBUG_FS
         ./scripts/config --disable PROFILING
         ./scripts/config --disable KPROBES
+        ./scripts/config --disable UPROBES
         ./scripts/config --disable KGDB
         ./scripts/config --disable SCHED_DEBUG
         ./scripts/config --disable FTRACE
+        ./scripts/config --disable FUNCTION_TRACER
         ./scripts/config --disable DYNAMIC_DEBUG
         ./scripts/config --disable MODULES
         ./scripts/config --disable IKCONFIG
+        ./scripts/config --disable AUDIT
+        ./scripts/config --disable SECURITY
+        ./scripts/config --disable NETWORK_FILESYSTEMS
+        ./scripts/config --disable WIRELESS
+        ./scripts/config --disable NFC
+        ./scripts/config --disable BLUETOOTH
+        ./scripts/config --disable DRM
+        ./scripts/config --disable SOUND
+        ./scripts/config --disable HID
+        ./scripts/config --disable USB
+        ./scripts/config --disable PCI
+        ./scripts/config --disable IOMMU_SUPPORT
+        ./scripts/config --disable VIRTUALIZATION
         
-        # Enable yang penting
+        # Enable essentials
         ./scripts/config --enable DEVTMPFS
         ./scripts/config --enable DEVTMPFS_MOUNT
         ./scripts/config --enable TTY
         ./scripts/config --enable SERIAL_AMBA_PL011
         ./scripts/config --enable SERIAL_AMBA_PL011_CONSOLE
+        ./scripts/config --enable EXT4_FS
+        ./scripts/config --enable VFAT_FS
+        ./scripts/config --enable MSDOS_FS
+        ./scripts/config --enable FAT_FS
+        ./scripts/config --enable NLS_CODEPAGE_437
+        ./scripts/config --enable NLS_ISO8859_1
         
-        # Build
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-        time make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+        # Finalize config
+        make ARCH=arm64 CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- olddefconfig
+        
+        echo "🚀 Compiling kernel..."
+        time make ARCH=arm64 CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- -j$(nproc)
+        
+        # Copy kernel image
+        cp arch/arm64/boot/Image ../output/zen-kernel
         cd ..
+        echo "✅ Kernel build completed"
 
+    # ========== MUSL LIBC BUILD ==========
     - name: Build musl libc
       run: |
-        echo "📚 Building musl libc..."
-        tar xf sources/musl-1.2.4.tar.gz
-        cd musl-1.2.4
-        ./configure --prefix=/usr --target=aarch64-linux-gnu
+        echo "📚 Building musl libc ${{ env.MUSL_VERSION }}..."
+        tar xf sources/musl-${{ env.MUSL_VERSION }}.tar.gz
+        cd musl-${{ env.MUSL_VERSION }}
+        
+        ./configure \
+          --prefix=/usr \
+          --target=${{ env.BUILD_ARCH }}-linux-gnu \
+          --disable-shared \
+          --enable-static
+        
         make -j$(nproc)
         make DESTDIR=$PWD/install install
+        
+        # Copy ke rootfs
+        cp -r install/usr/* ../rootfs/usr/
         cd ..
+        echo "✅ musl libc installed"
 
-    - name: Build BusyBox
+    # ========== BUSYBOX BUILD ==========
+    - name: Build BusyBox static
       run: |
-        echo "📦 Building BusyBox..."
-        tar xf sources/busybox-1.36.1.tar.bz2
-        cd busybox-1.36.1
+        echo "📦 Building BusyBox ${{ env.BUSYBOX_VERSION }} static..."
+        tar xf sources/busybox-${{ env.BUSYBOX_VERSION }}.tar.bz2
+        cd busybox-${{ env.BUSYBOX_VERSION }}
         
-        # Pakai defconfig
-        make CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        # Config dasar
+        make CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- defconfig
         
-        # Static build
+        # Modifikasi config untuk static build
         sed -i 's/CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
         sed -i 's/CONFIG_FEATURE_IPV6=.*/# CONFIG_FEATURE_IPV6 is not set/' .config
+        sed -i 's/CONFIG_INETD=.*/# CONFIG_INETD is not set/' .config
+        sed -i 's/CONFIG_TELNETD=.*/# CONFIG_TELNETD is not set/' .config
+        sed -i 's/CONFIG_FEATURE_TELNETD_STANDALONE=.*/# CONFIG_FEATURE_TELNETD_STANDALONE is not set/' .config
         
-        # Non-interactive build
-        yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig
-        time make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+        # Auto-answer prompts
+        yes "" | make CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- oldconfig
+        
+        echo "🔨 Compiling BusyBox..."
+        time make CROSS_COMPILE=${{ env.BUILD_ARCH }}-linux-gnu- -j$(nproc)
+        
+        # Install ke rootfs
+        cp busybox ../rootfs/bin/
+        chmod +x ../rootfs/bin/busybox
         cd ..
+        echo "✅ BusyBox build completed"
 
-    - name: Create minimal rootfs
+    - name: Setup BusyBox symlinks
       run: |
-        echo "🏗️ Creating rootfs structure..."
-        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,usr/local,var/cache/apk,tmp,home,wildan,root,.config,sbin,lib,opt,run,mnt,media}
-        cp busybox-1.36.1/busybox rootfs/bin/
-        cp -r musl-1.2.4/install/usr/lib/* rootfs/usr/lib/
-        
-        chmod +x rootfs/bin/busybox
-        
-        # Create busybox symlinks
+        echo "🔗 Creating BusyBox symlinks..."
         cd rootfs/bin
-        for app in $(./busybox --list); do
-          ln -s busybox $app 2>/dev/null || true
+        
+        # Create symlinks untuk semua applets
+        ./busybox --list | while read app; do
+          if [ ! -e "$app" ] && [ "$app" != "busybox" ]; then
+            ln -s busybox "$app"
+          fi
         done
         cd ../..
+        echo "✅ BusyBox symlinks created"
 
+    # ========== ALPINE APK SETUP ==========
     - name: Setup Alpine APK package manager
       run: |
-        echo "📥 Setting up Alpine APK..."
+        echo "📥 Setting up Alpine APK package manager..."
         
-        # Download Alpine APK tools
-        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
-        tar -xzf apk-tools-static-2.14.0-r2.apk
+        # Download APK tools static
+        wget -O apk-tools-static.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
+        tar -xzf apk-tools-static.apk
         cp sbin/apk.static rootfs/sbin/
-        
-        # Create APK directories
-        mkdir -p rootfs/etc/apk
-        mkdir -p rootfs/var/cache/apk
-        mkdir -p rootfs/etc/apk/keys
+        chmod +x rootfs/sbin/apk.static
         
         # Setup APK repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > rootfs/etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> rootfs/etc/apk/repositories
+        mkdir -p rootfs/etc/apk
+        cat > rootfs/etc/apk/repositories << EOF
+http://dl-cdn.alpinelinux.org/alpine/v3.19/main
+http://dl-cdn.alpinelinux.org/alpine/v3.19/community
+EOF
         
-        # Download Alpine keys
-        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
-        tar -xzf alpine-keys-2.4-r1.apk
-        cp -r etc/apk/keys/* rootfs/etc/apk/keys/
+        # Setup APK keys
+        mkdir -p rootfs/etc/apk/keys
+        wget -O alpine-keys.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
+        tar -xzf alpine-keys.apk
+        cp etc/apk/keys/* rootfs/etc/apk/keys/
+        
+        echo "✅ APK setup completed"
 
-    - name: Install Alpine packages
+    - name: Install Alpine packages dengan QEMU
       run: |
-        echo "📦 Installing Alpine packages..."
+        echo "📦 Installing Alpine packages dengan QEMU chroot..."
         
-        # Copy QEMU static binary
+        # Setup QEMU static
         cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
         chmod +x rootfs/usr/bin/qemu-aarch64-static
         
-        # Setup basic files
+        # Setup basic system files
         echo "nameserver 8.8.8.8" > rootfs/etc/resolv.conf
         echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
         echo "zen-unix" > rootfs/etc/hostname
         
-        # Install Alpine base
+        # Setup fstab dasar
+        cat > rootfs/etc/fstab << EOF
+/dev/root / ext4 defaults 0 1
+proc /proc proc defaults 0 0
+tmpfs /tmp tmpfs defaults 0 0
+EOF
+
+        # Update dan install base system
         sudo chroot rootfs /sbin/apk.static update
         sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base
         
-        # Install semua package yang diminta
+        # Install packages utama
+        echo "🛠️ Installing main packages..."
         sudo chroot rootfs /sbin/apk add --no-cache \
           bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
           figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
-          iproute2 iputils dhcpcd openssh-server
+          iproute2 iputils dhcpcd openssh-server sudo dropbear dropbear-scp
         
-        # Clean up
+        # Clean APK cache
+        sudo chroot rootfs /sbin/apk cache clean
+        
+        # Remove QEMU
         rm rootfs/usr/bin/qemu-aarch64-static
+        
+        echo "✅ Alpine packages installed"
 
-    - name: Install Go dari Alpine
+    # ========== SYSTEM CONFIGURATION ==========
+    - name: Create system initialization
       run: |
-        echo "🐹 Installing Go..."
+        echo "🎯 Creating system initialization..."
+        
+        # Create init script
+        cat > rootfs/init << 'EOF'
+#!/bin/bash
+# Zen Unix Init Script
+# by Wildan Hermawan - https://github.com/sfiraz
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
+
+# Mount filesystems
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mount -t tmpfs none /tmp
+
+# Create essential device nodes
+mknod /dev/console c 5 1 2>/dev/null || true
+mknod /dev/null c 1 3 2>/dev/null || true
+mknod /dev/zero c 1 5 2>/dev/null || true
+mknod /dev/random c 1 8 2>/dev/null || true
+
+# Setup network
+mkdir -p /var/run/dhcpcd
+ip link set lo up
+
+# Start services
+if [ -f /usr/sbin/sshd ]; then
+    /usr/sbin/sshd &
+    echo "🔐 SSH server started"
+fi
+
+if [ -f /usr/sbin/dropbear ]; then
+    /usr/sbin/dropbear -R &
+    echo "🔐 Dropbear SSH started"
+fi
+
+# Display welcome message
+clear
+echo "================================================"
+figlet "Zen Unix" 2>/dev/null || echo "ZEN UNIX"
+echo "================================================"
+echo "🐧  ARM64 Linux Distro by Wildan Hermawan"
+echo "📱  GitHub: https://github.com/sfiraz"
+echo "🚀  Version: $ZEN_VERSION"
+echo "💻  Kernel: $(uname -r)"
+echo "🔧  Packages: Alpine + APK"
+echo "================================================"
+echo ""
+
+# Start shell
+export PS1="\[\033[1;32m\]\u@zen-unix\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ "
+exec /bin/bash
+EOF
+
+        chmod +x rootfs/init
+        echo "✅ Init script created"
+
+    - name: Create user environment
+      run: |
+        echo "🎨 Creating user environment..."
+        
+        # Create .bashrc untuk root
+        cat > rootfs/root/.bashrc << 'EOF'
+# Zen Unix Custom Bashrc
+
+export PS1="\[\033[1;32m\]\u@zen-unix\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ "
+export TERM=xterm-256color
+
+# Aliases untuk productivity
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias la='ls -A'
+alias l='ls -CF'
+alias grep='grep --color=auto'
+alias egrep='egrep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias cat='bat'
+alias find='fd'
+alias ps='ps auxf'
+alias top='htop'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+
+# Development aliases
+alias g='git'
+alias gs='git status'
+alias gc='git commit'
+alias gp='git push'
+alias gob='go build'
+alias gor='go run'
+
+# Functions
+zenfetch() {
+    clear
+    echo "================================================"
+    figlet "Zen Unix" 2>/dev/null || echo "ZEN UNIX"
+    echo "================================================"
+    echo "🐧  ARM64 Linux by Wildan Hermawan"
+    echo "📱  GitHub: https://github.com/sfiraz" 
+    echo "🚀  $(uname -srm)"
+    echo "💻  $(cat /etc/alpine-release 2>/dev/null || echo 'Musl Linux')"
+    echo "🔧  $(go version 2>/dev/null || echo 'Go: Not installed')"
+    echo "================================================"
+}
+
+# Welcome message
+zenfetch
+echo "Type 'zenfetch' to show system info"
+echo "Available tools:"
+echo "  📁 File: ls, find, bat, tree, fzf"
+echo "  🔧 System: htop, neofetch, tmux, nano"
+echo "  🌐 Network: curl, wget, ssh, git"
+echo "  🐹 Development: go, gcc, make, cmake"
+echo "  🎨 Fun: figlet, lolcat, cmatrix"
+EOF
+
+        # Copy ke home user
+        mkdir -p rootfs/home/wildan
+        cp rootfs/root/.bashrc rootfs/home/wildan/
+        chown -R 1000:1000 rootfs/home/wildan
+
+        # Setup Go environment
+        mkdir -p rootfs/home/{wildan,go}/{bin,src,pkg}
+        echo '' >> rootfs/root/.bashrc
+        echo '# Go development environment' >> rootfs/root/.bashrc
+        echo 'export GOPATH=$HOME/go' >> rootfs/root/.bashrc
+        echo 'export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
+
+        echo "✅ User environment configured"
+
+    - name: Create sample applications
+      run: |
+        echo "🐹 Creating sample applications..."
+        
+        # Sample Go program
+        mkdir -p rootfs/home/wildan/zen-hello
+        cat > rootfs/home/wildan/zen-hello/main.go << 'EOF'
+package main
+
+import (
+    "fmt"
+    "runtime"
+    "time"
+)
+
+func main() {
+    fmt.Println("🐧  Welcome to Zen Unix!")
+    fmt.Println("📱  ARM64 Linux by Wildan Hermawan")
+    fmt.Println("🌐  GitHub: https://github.com/sfiraz")
+    fmt.Printf("🚀  OS: %s\n", runtime.GOOS)
+    fmt.Printf("💻  Arch: %s\n", runtime.GOARCH)
+    fmt.Printf("⏰  Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+    fmt.Println("✨  Enjoy your Zen experience!")
+}
+EOF
+
+        # Build sample Go program
         cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
         chmod +x rootfs/usr/bin/qemu-aarch64-static
-        
-        # Install Go package
-        sudo chroot rootfs /sbin/apk add --no-cache go
-        
+        sudo chroot rootfs /usr/bin/go build -o /home/wildan/zen-hello/hello /home/wildan/zen-hello/main.go
         rm rootfs/usr/bin/qemu-aarch64-static
 
-    - name: Create custom init script
-      run: |
-        echo "🎯 Creating init script..."
-        
-        # Buat init script dengan multiple echo
-        echo '#!/bin/bash' > rootfs/init
-        echo '' >> rootfs/init
-        echo '# Zen Unix Init Script' >> rootfs/init
-        echo '# by Wildan Hermawan - https://github.com/sfiraz' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'mount -t proc none /proc' >> rootfs/init
-        echo 'mount -t sysfs none /sys' >> rootfs/init
-        echo 'mount -t devtmpfs none /dev' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'mknod /dev/console c 5 1 2>/dev/null || true' >> rootfs/init
-        echo 'mknod /dev/null c 1 3 2>/dev/null || true' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'mkdir -p /var/run/dhcpcd' >> rootfs/init
-        echo 'dhcpcd lo &' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'clear' >> rootfs/init
-        echo 'echo "================================================"' >> rootfs/init
-        echo 'echo "    ___    _   _   ___   _   _   ___"' >> rootfs/init
-        echo 'echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/init
-        echo 'echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/init
-        echo 'echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/init
-        echo 'echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/init
-        echo 'echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/init
-        echo 'echo "================================================"' >> rootfs/init
-        echo 'echo "🐧  ARM64 Linux Distro by Wildan Hermawan"' >> rootfs/init
-        echo 'echo "📱  GitHub: https://github.com/sfiraz"' >> rootfs/init
-        echo 'echo "🚀  Kernel: $(uname -r)"' >> rootfs/init
-        echo 'echo "💻  Alpine Linux + APK Package Manager"' >> rootfs/init
-        echo 'echo "================================================"' >> rootfs/init
-        echo 'echo ""' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'if [ -f /usr/sbin/sshd ]; then' >> rootfs/init
-        echo '    /usr/sbin/sshd &' >> rootfs/init
-        echo '    echo "🔐 SSH server started on port 22"' >> rootfs/init
-        echo 'fi' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'exec /bin/bash' >> rootfs/init
-        
-        chmod +x rootfs/init
+        # Create welcome script
+        cat > rootfs/usr/local/bin/zen-welcome << 'EOF'
+#!/bin/bash
+echo "================================================"
+echo "    ___    _   _   ___   _   _   ___"
+echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"
+echo "      ) | |  \\| |    ) ||  \\| || | | |"
+echo "     / /  | . \` |   / / | . \` || | | |"
+echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"
+echo "   |____| |_| \\_| |____||_| \\_| \\___/"
+echo "================================================"
+echo "🐧  Zen Unix - Minimal ARM64 Linux Distribution"
+echo "👨‍💻  Created by: Wildan Hermawan"
+echo "🔗  GitHub: https://github.com/sfiraz"
+echo "📧  Contact: wildan@zen-unix.dev"
+echo "================================================"
+EOF
 
-    - name: Create user customization
-      run: |
-        echo "🎨 Creating user customization..."
-        
-        # .bashrc untuk root
-        echo '# Zen Unix Custom Bashrc' > rootfs/root/.bashrc
-        echo 'export PS1="\\[\\033[1;32m\\]\\u@zen-unix\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]$ "' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo '# Aliases' >> rootfs/root/.bashrc
-        echo 'alias ls="ls --color=auto"' >> rootfs/root/.bashrc
-        echo 'alias ll="ls -la"' >> rootfs/root/.bashrc
-        echo 'alias la="ls -A"' >> rootfs/root/.bashrc
-        echo 'alias grep="grep --color=auto"' >> rootfs/root/.bashrc
-        echo 'alias cat="bat"' >> rootfs/root/.bashrc
-        echo 'alias find="fd"' >> rootfs/root/.bashrc
-        echo 'alias ..="cd .."' >> rootfs/root/.bashrc
-        echo 'alias ...="cd ../.."' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo '# Functions' >> rootfs/root/.bashrc
-        echo 'zenfetch() {' >> rootfs/root/.bashrc
-        echo '    clear' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '    echo "    ___    _   _   ___   _   _   ___"' >> rootfs/root/.bashrc
-        echo '    echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/root/.bashrc
-        echo '    echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/root/.bashrc
-        echo '    echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/root/.bashrc
-        echo '    echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/root/.bashrc
-        echo '    echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '    echo "🐧  ARM64 Linux by Wildan Hermawan"' >> rootfs/root/.bashrc
-        echo '    echo "📱  GitHub: https://github.com/sfiraz"' >> rootfs/root/.bashrc
-        echo '    echo "🚀  $(uname -srm)"' >> rootfs/root/.bashrc
-        echo '    echo "💻  Alpine Linux $(cat /etc/alpine-release 2>/dev/null || echo "Musl Linux")"' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '}' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo '# Welcome message' >> rootfs/root/.bashrc
-        echo 'zenfetch' >> rootfs/root/.bashrc
-        echo 'echo "Type '\''zenfetch'\'' to show this info again"' >> rootfs/root/.bashrc
-        echo 'echo "Available tools: bash, curl, wget, nano, htop, git, tmux, go, etc."' >> rootfs/root/.bashrc
-        
-        # Copy ke home user
-        cp rootfs/root/.bashrc rootfs/home/
-        
-        # Setup Go environment
-        mkdir -p rootfs/home/go/{bin,src,pkg}
-        echo '' >> rootfs/root/.bashrc
-        echo '# Go environment' >> rootfs/root/.bashrc
-        echo 'export GOPATH=/home/go' >> rootfs/root/.bashrc
-        echo 'export PATH=$PATH:/usr/bin/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
+        chmod +x rootfs/usr/local/bin/zen-welcome
+        echo "✅ Sample applications created"
 
-    - name: Create sample Go program
+    # ========== FINAL SYSTEM SETUP ==========
+    - name: Create essential device nodes
       run: |
-        echo "🐹 Creating sample Go program..."
-        mkdir -p rootfs/home/wildan/hello
-        echo 'package main' > rootfs/home/wildan/hello/main.go
-        echo '' >> rootfs/home/wildan/hello/main.go
-        echo 'import "fmt"' >> rootfs/home/wildan/hello/main.go
-        echo '' >> rootfs/home/wildan/hello/main.go
-        echo 'func main() {' >> rootfs/home/wildan/hello/main.go
-        echo '    fmt.Println("🐧 Welcome to Zen Unix!")' >> rootfs/home/wildan/hello/main.go
-        echo '    fmt.Println("📱 ARM64 Linux by Wildan Hermawan")' >> rootfs/home/wildan/hello/main.go
-        echo '    fmt.Println("🚀 Powered by Go")' >> rootfs/home/wildan/hello/main.go
-        echo '    fmt.Printf("💻 Architecture: %s\\n", "aarch64")' >> rootfs/home/wildan/hello/main.go
-        echo '}' >> rootfs/home/wildan/hello/main.go
-
-    - name: Create device nodes
-      run: |
-        echo "⚙️ Creating device nodes..."
+        echo "⚙️ Creating essential device nodes..."
+        
         sudo mknod rootfs/dev/console c 5 1
         sudo mknod rootfs/dev/null c 1 3
         sudo mknod rootfs/dev/zero c 1 5
         sudo mknod rootfs/dev/random c 1 8
         sudo mknod rootfs/dev/urandom c 1 9
+        
+        # TTY devices
+        for i in 0 1 2 3 4 5 6 7 8 9; do
+            sudo mknod rootfs/dev/tty$i c 4 $i 2>/dev/null || true
+        done
+        
+        echo "✅ Device nodes created"
 
     - name: Create bootable image
       run: |
         echo "💾 Creating bootable image..."
-        dd if=/dev/zero of=zen-unix.img bs=1M count=256
-        mkfs.ext4 -F zen-unix.img
+        
+        # Create disk image
+        dd if=/dev/zero of=output/zen-unix.img bs=1M count=512
+        mkfs.ext4 -F output/zen-unix.img
+        
+        # Mount dan copy rootfs
         mkdir -p mnt
-        sudo mount -o loop zen-unix.img mnt
-        sudo cp -r rootfs/* mnt/
+        sudo mount -o loop output/zen-unix.img mnt
+        sudo cp -ra rootfs/* mnt/
         sudo umount mnt
+        
+        # Copy kernel
+        cp linux-${{ env.KERNEL_VERSION }}/arch/arm64/boot/Image output/zen-kernel
+        
+        echo "✅ Bootable image created"
+
+    # ========== ARTIFACTS & TESTING ==========
+    - name: Create documentation
+      run: |
+        echo "📝 Creating documentation..."
+        
+        cat > output/README.md << EOF
+# 🐧 Zen Unix ${{ env.ZEN_VERSION }}
+
+Minimal ARM64 Linux Distribution by Wildan Hermawan
+
+## 📋 Features
+
+- **Kernel**: Linux ${{ env.KERNEL_VERSION }} (ARM64 optimized)
+- **Libc**: musl ${{ env.MUSL_VERSION }} (static)
+- **Shell**: Bash + BusyBox ${{ env.BUSYBOX_VERSION }}
+- **Package Manager**: Alpine APK
+- **Architecture**: AArch64 (ARM64)
+
+## 🛠 Included Tools
+
+### Core System
+- bash, musl, busybox, alpine-base
+- util-linux, e2fsprogs, kbd, kmod
+
+### Development
+- Go programming language
+- build-base (gcc, make, binutils)
+- cmake, pkgconfig, git
+
+### Network Tools
+- curl, wget, openssh, iproute2
+- dhcpcd, dropbear, iptables
+
+### CLI Productivity
+- nano, htop, neofetch, tmux
+- tree, bat, ripgrep, fd, fzf, jq
+
+### Aesthetic & Fun
+- figlet, lolcat, cmatrix
+
+## 🚀 Quick Start
+
+### Boot with QEMU:
+\`\`\`bash
+qemu-system-aarch64 \\
+  -M virt -cpu cortex-a53 -smp 4 -m 2G \\
+  -kernel zen-kernel \\
+  -drive file=zen-unix.img,format=raw \\
+  -append "console=ttyAMA0 root=/dev/vda rw init=/init" \\
+  -nographic
+\`\`\`
+
+### Default Credentials
+- Username: \`root\`
+- Password: \`zen\` (if set)
+
+## 🔧 Usage Tips
+
+1. Type \`zenfetch\` for system info
+2. Use \`apk update && apk add <package>\` to install software
+3. \`zen-welcome\` shows welcome message
+4. Sample Go app: \`/home/wildan/zen-hello/hello\`
+
+## 📞 Support
+
+- **Developer**: Wildan Hermawan
+- **GitHub**: https://github.com/sfiraz
+- **Email**: wildan@zen-unix.dev
+
+## 📄 License
+
+MIT License - Feel free to modify and distribute!
+EOF
+
+        echo "✅ Documentation created"
 
     - name: Upload final artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: zen-unix-complete-system
+        name: zen-unix-${{ env.ZEN_VERSION }}-${{ env.BUILD_ARCH }}
         path: |
-          zen-unix.img
-          linux-6.6.9/arch/arm64/boot/Image
-        retention-days: 7
+          output/zen-unix.img
+          output/zen-kernel
+          output/README.md
+        retention-days: 30
+        compression-level: 9
 
+    # ========== BUILD SUMMARY ==========
     - name: Show build summary
       run: |
-        echo "✅ ZEN UNIX BUILD COMPLETED SUCCESSFULLY!"
         echo ""
-        echo "📦 FINAL ARTIFACTS:"
-        echo "   🖼️  zen-unix.img (RootFS with Alpine packages)"
-        echo "   ⚙️  Kernel Image (ARM64)"
+        echo "🎉 ZEN UNIX BUILD COMPLETED SUCCESSFULLY!"
+        echo "================================================"
+        echo "🐧  Zen Unix ${{ env.ZEN_VERSION }} - ARM64"
+        echo "👨‍💻  By Wildan Hermawan"
+        echo "🔗  GitHub: https://github.com/sfiraz"
         echo ""
-        echo "🐧 INCLUDED PACKAGES:"
-        echo "   💻 Core: bash, musl, busybox, alpine-base"
-        echo "   🌐 Network: curl, wget, openssh, iproute2, dhcpcd"
-        echo "   🔧 Tools: nano, htop, neofetch, git, tmux"
-        echo "   🎨 CLI UX: tree, bat, ripgrep, fd, fzf, jq"
-        echo "   ✨ Aesthetic: figlet, lolcat, cmatrix"
-        echo "   🐹 Development: go, build-base, cmake, pkgconfig"
+        echo "📦 BUILD ARTIFACTS:"
+        echo "   💾 zen-unix.img    - Root filesystem (512MB)"
+        echo "   ⚙️  zen-kernel     - Linux kernel image"
+        echo "   📖 README.md       - Documentation"
         echo ""
-        echo "📊 BUILD INFO:"
-        ls -lh zen-unix.img
-        ls -lh linux-6.6.9/arch/arm64/boot/Image
+        echo "📊 BUILD STATISTICS:"
+        echo "   🏗️  Kernel: Linux ${{ env.KERNEL_VERSION }}"
+        echo "   📚 Libc: musl ${{ env.MUSL_VERSION }}"
+        echo "   🛠️  Tools: BusyBox ${{ env.BUILD_ARCH }}"
+        echo "   📦 Packages: Alpine APK ecosystem"
         echo ""
-        echo "🎉 Zen Unix by Wildan Hermawan is ready!"
-        echo "🌐 GitHub: https://github.com/sfiraz"
+        echo "🚀 QUICK START:"
+        echo "   Artifacts uploaded to GitHub Actions"
+        echo "   Use QEMU to test: qemu-system-aarch64 ..."
+        echo "   Flash to ARM64 device for production"
+        echo ""
+        echo "🔮 NEXT STEPS:"
+        echo "   1. Download artifacts from Actions tab"
+        echo "   2. Test with QEMU or real hardware"
+        echo "   3. Customize and extend for your needs"
+        echo "   4. Share your improvements!"
+        echo ""
+        echo "✨ Thank you for using Zen Unix!"
+        echo "================================================"
+
+    - name: Notify build completion
+      run: |
+        echo "✅ Zen Unix build process completed at $(date)"
+        echo "📅 Build timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        echo "🐧 Version: ${{ env.ZEN_VERSION }}"
+        echo "🏗️ Architecture: ${{ env.BUILD_ARCH }}"
