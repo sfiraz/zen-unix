@@ -150,18 +150,16 @@ jobs:
 
     - name: Create init script
       run: |
-        cat > rootfs/init << 'EOF'
-#!/bin/sh
-mount -t proc none /proc
-mount -t sysfs none /sys
-mount -t devtmpfs none /dev
-echo ""
-echo "🐧 Welcome to Zen Unix - Wildan Distro!"
-echo "📱 ARM64 Linux by Wildan Hermawan"
-echo "🚀 Kernel: \$(uname -r)"
-echo ""
-exec /bin/sh
-EOF
+        echo '#!/bin/sh' > rootfs/init
+        echo 'mount -t proc none /proc' >> rootfs/init
+        echo 'mount -t sysfs none /sys' >> rootfs/init
+        echo 'mount -t devtmpfs none /dev' >> rootfs/init
+        echo 'echo ""' >> rootfs/init
+        echo 'echo "🐧 Welcome to Zen Unix - Wildan Distro!"' >> rootfs/init
+        echo 'echo "📱 ARM64 Linux by Wildan Hermawan"' >> rootfs/init
+        echo 'echo "🚀 Kernel: $(uname -r)"' >> rootfs/init
+        echo 'echo ""' >> rootfs/init
+        echo 'exec /bin/sh' >> rootfs/init
         chmod +x rootfs/init
 
     - name: Create essential device nodes
