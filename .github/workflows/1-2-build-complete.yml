@@ -1,4 +1,4 @@
-name: "[1+2] Build Complete Toolchain + Kernel RootFS + Alpine Packages"
+name: "🚀 Zen Unix - Complete Build"
 
 on:
   workflow_dispatch:
@@ -35,46 +35,41 @@ jobs:
           qemu-system-aarch64 \
           qemu-user-static
 
-    - name: Download sources with retry and mirrors
+    - name: Download sources dengan retry
       run: |
         mkdir -p sources
         cd sources
         
-        # Download Binutils dengan multiple mirrors dan retry
+        echo "📦 Downloading source packages..."
+        
+        # Download Binutils dengan multiple mirrors
         for mirror in "https://mirror.koddos.net/gnu/binutils/" "https://ftp.gnu.org/gnu/binutils/" "http://mirror.csclub.uwaterloo.ca/gnu/binutils/"; do
-          echo "Trying mirror: $mirror"
-          if wget --timeout=30 --tries=3 "${mirror}binutils-2.42.tar.xz"; then
-            echo "✅ Binutils downloaded successfully"
+          echo "Trying Binutils mirror: $mirror"
+          if wget --timeout=30 --tries=2 "${mirror}binutils-2.42.tar.xz"; then
+            echo "✅ Binutils downloaded"
             break
           fi
-          echo "❌ Mirror failed, trying next..."
         done
         
         # Download Linux kernel
-        wget --timeout=30 --tries=3 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz || \
-        wget --timeout=30 --tries=3 https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz
+        wget --timeout=30 --tries=2 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz || \
+        wget --timeout=30 --tries=2 https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz
         
         # Download Musl
-        wget --timeout=30 --tries=3 https://musl.libc.org/releases/musl-1.2.4.tar.gz
+        wget --timeout=30 --tries=2 https://musl.libc.org/releases/musl-1.2.4.tar.gz
         
         # Download BusyBox
-        wget --timeout=30 --tries=3 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+        wget --timeout=30 --tries=2 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
 
         # Verify downloads
+        echo "📁 Verifying downloads..."
         ls -la
-        for file in *.tar.* *.bz2 *.gz; do
-          if [ -f "$file" ]; then
-            echo "✅ $file downloaded successfully"
-          else
-            echo "❌ $file failed to download"
-            exit 1
-          fi
-        done
         cd ..
 
     # ========== PHASE 1: TOOLCHAIN ==========
     - name: Build Binutils
       run: |
+        echo "🔧 Building Binutils..."
         tar xf sources/binutils-2.42.tar.xz
         cd binutils-2.42
         mkdir build && cd build
@@ -85,6 +80,7 @@ jobs:
 
     - name: Build Linux Kernel Headers
       run: |
+        echo "📋 Building Kernel Headers..."
         tar xf sources/linux-6.6.9.tar.xz
         cd linux-6.6.9
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
@@ -92,14 +88,15 @@ jobs:
         cd ..
 
     # ========== PHASE 2: KERNEL + ROOTFS ==========
-    - name: Build Linux Kernel (FAST Optimized)
+    - name: Build Linux Kernel (Optimized)
       run: |
+        echo "🐧 Building Linux Kernel..."
         cd linux-6.6.9
         
-        # Pakai defconfig untuk build cepat
+        # Pakai defconfig
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # OPTIMASI MAXIMAL untuk build cepat
+        # Optimasi untuk build cepat
         ./scripts/config --disable DEBUG_INFO
         ./scripts/config --disable DEBUG_KERNEL
         ./scripts/config --disable DEBUG_FS
@@ -111,32 +108,22 @@ jobs:
         ./scripts/config --disable DYNAMIC_DEBUG
         ./scripts/config --disable MODULES
         ./scripts/config --disable IKCONFIG
-        ./scripts/config --disable AUDIT
-        ./scripts/config --disable SECURITY
-        ./scripts/config --disable NETWORK_FILESYSTEMS
-        ./scripts/config --disable WIRELESS
-        ./scripts/config --disable BLUETOOTH
-        ./scripts/config --disable DRM
-        ./scripts/config --disable SOUND
-        ./scripts/config --disable HID
-        ./scripts/config --disable USB
-        ./scripts/config --disable PCI
         
-        # Enable yang penting saja
+        # Enable yang penting
         ./scripts/config --enable DEVTMPFS
         ./scripts/config --enable DEVTMPFS_MOUNT
         ./scripts/config --enable TTY
         ./scripts/config --enable SERIAL_AMBA_PL011
         ./scripts/config --enable SERIAL_AMBA_PL011_CONSOLE
         
-        # Build dengan optimasi speed
-        echo "🚀 Building kernel with MAX optimization..."
+        # Build
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         time make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
 
     - name: Build musl libc
       run: |
+        echo "📚 Building musl libc..."
         tar xf sources/musl-1.2.4.tar.gz
         cd musl-1.2.4
         ./configure --prefix=/usr --target=aarch64-linux-gnu
@@ -144,36 +131,31 @@ jobs:
         make DESTDIR=$PWD/install install
         cd ..
 
-    - name: Build BusyBox (Fixed - No Interactive)
+    - name: Build BusyBox
       run: |
+        echo "📦 Building BusyBox..."
         tar xf sources/busybox-1.36.1.tar.bz2
         cd busybox-1.36.1
         
         # Pakai defconfig
         make CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # FIX: Gunakan sed untuk modifikasi config
+        # Static build
         sed -i 's/CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
         sed -i 's/CONFIG_FEATURE_IPV6=.*/# CONFIG_FEATURE_IPV6 is not set/' .config
-        sed -i 's/CONFIG_TC=.*/# CONFIG_TC is not set/' .config
-        sed -i 's/CONFIG_IP=.*/# CONFIG_IP is not set/' .config
-        sed -i 's/CONFIG_NETWORKING=.*/# CONFIG_NETWORKING is not set/' .config
         
-        # FIX: Gunakan oldconfig dengan input automatic
+        # Non-interactive build
         yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig
-        
-        # Build static
-        echo "🔨 Building BusyBox static..."
         time make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
 
     - name: Create minimal rootfs
       run: |
-        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,usr/local,var/cache/apk,tmp,home,wildan,root,.config,sbin,lib}
+        echo "🏗️ Creating rootfs structure..."
+        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,usr/local,var/cache/apk,tmp,home,wildan,root,.config,sbin,lib,opt,run,mnt,media}
         cp busybox-1.36.1/busybox rootfs/bin/
         cp -r musl-1.2.4/install/usr/lib/* rootfs/usr/lib/
         
-        # Pastikan busybox executable
         chmod +x rootfs/bin/busybox
         
         # Create busybox symlinks
@@ -183,18 +165,12 @@ jobs:
         done
         cd ../..
 
-    - name: Setup Alpine APK package manager dengan mirror yang reliable
+    - name: Setup Alpine APK package manager
       run: |
-        # Download Alpine APK tools static dengan retry
-        for mirror in "http://dl-cdn.alpinelinux.org/alpine/" "http://mirror.leaseweb.com/alpine/"; do
-          echo "Trying Alpine mirror: $mirror"
-          if wget --timeout=30 --tries=3 "${mirror}v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk"; then
-            echo "✅ APK tools downloaded successfully"
-            break
-          fi
-          echo "❌ Mirror failed, trying next..."
-        done
+        echo "📥 Setting up Alpine APK..."
         
+        # Download Alpine APK tools
+        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
         tar -xzf apk-tools-static-2.14.0-r2.apk
         cp sbin/apk.static rootfs/sbin/
         
@@ -203,129 +179,114 @@ jobs:
         mkdir -p rootfs/var/cache/apk
         mkdir -p rootfs/etc/apk/keys
         
-        # Setup APK repositories dengan multiple mirrors
-        cat > rootfs/etc/apk/repositories << EOF
-http://dl-cdn.alpinelinux.org/alpine/v3.19/main
-http://dl-cdn.alpinelinux.org/alpine/v3.19/community
-http://mirror.leaseweb.com/alpine/v3.19/main
-http://mirror.leaseweb.com/alpine/v3.19/community
-EOF
+        # Setup APK repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > rootfs/etc/apk/repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> rootfs/etc/apk/repositories
         
-        # Download Alpine keys dengan retry
-        for mirror in "http://dl-cdn.alpinelinux.org/alpine/" "http://mirror.leaseweb.com/alpine/"; do
-          echo "Trying keys mirror: $mirror"
-          if wget --timeout=30 --tries=3 "${mirror}v3.19/main/aarch64/alpine-keys-2.4-r1.apk"; then
-            echo "✅ Alpine keys downloaded successfully"
-            break
-          fi
-          echo "❌ Mirror failed, trying next..."
-        done
-        
+        # Download Alpine keys
+        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
         tar -xzf alpine-keys-2.4-r1.apk
         cp -r etc/apk/keys/* rootfs/etc/apk/keys/
 
-    - name: Install Alpine packages using QEMU
+    - name: Install Alpine packages
       run: |
-        # Copy QEMU static binary for chroot
+        echo "📦 Installing Alpine packages..."
+        
+        # Copy QEMU static binary
         cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
         chmod +x rootfs/usr/bin/qemu-aarch64-static
         
-        # Setup basic files for Alpine
+        # Setup basic files
         echo "nameserver 8.8.8.8" > rootfs/etc/resolv.conf
         echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
         echo "zen-unix" > rootfs/etc/hostname
         
-        # Chroot dan install packages dengan retry
-        max_retries=3
-        retry_count=0
+        # Install Alpine base
+        sudo chroot rootfs /sbin/apk.static update
+        sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base
         
-        while [ $retry_count -lt $max_retries ]; do
-          echo "Attempt $((retry_count + 1)) to setup Alpine packages..."
-          if sudo chroot rootfs /sbin/apk.static update && \
-             sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base; then
-            echo "✅ Alpine base installed successfully"
-            break
-          else
-            retry_count=$((retry_count + 1))
-            echo "❌ Attempt $retry_count failed, retrying..."
-            sleep 5
-          fi
-        done
-        
-        if [ $retry_count -eq $max_retries ]; then
-          echo "❌ Failed to install Alpine base after $max_retries attempts"
-          exit 1
-        fi
-        
-        # Install packages utama
+        # Install semua package yang diminta
         sudo chroot rootfs /sbin/apk add --no-cache \
           bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
           figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
           iproute2 iputils dhcpcd openssh-server
         
-        # Remove QEMU binary after use
+        # Clean up
+        rm rootfs/usr/bin/qemu-aarch64-static
+
+    - name: Install Go dari Alpine
+      run: |
+        echo "🐹 Installing Go..."
+        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
+        chmod +x rootfs/usr/bin/qemu-aarch64-static
+        
+        # Install Go package
+        sudo chroot rootfs /sbin/apk add --no-cache go
+        
         rm rootfs/usr/bin/qemu-aarch64-static
 
     - name: Create custom init script
       run: |
+        echo "🎯 Creating init script..."
+        
+        # Buat init script dengan multiple echo
         echo '#!/bin/bash' > rootfs/init
-        echo '# Zen Unix Init Script - by Wildan Hermawan' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Mount filesystems' >> rootfs/init
+        echo '# Zen Unix Init Script' >> rootfs/init
+        echo '# by Wildan Hermawan - https://github.com/sfiraz' >> rootfs/init
+        echo '' >> rootfs/init
         echo 'mount -t proc none /proc' >> rootfs/init
         echo 'mount -t sysfs none /sys' >> rootfs/init
         echo 'mount -t devtmpfs none /dev' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Create device nodes if needed' >> rootfs/init
         echo 'mknod /dev/console c 5 1 2>/dev/null || true' >> rootfs/init
         echo 'mknod /dev/null c 1 3 2>/dev/null || true' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Setup network' >> rootfs/init
         echo 'mkdir -p /var/run/dhcpcd' >> rootfs/init
         echo 'dhcpcd lo &' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Display welcome message' >> rootfs/init
         echo 'clear' >> rootfs/init
         echo 'echo "================================================"' >> rootfs/init
         echo 'echo "    ___    _   _   ___   _   _   ___"' >> rootfs/init
         echo 'echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/init
         echo 'echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/init
-        echo 'echo "     / /  | . ` |   / / | . ` || | | |"' >> rootfs/init
+        echo 'echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/init
         echo 'echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/init
         echo 'echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/init
         echo 'echo "================================================"' >> rootfs/init
         echo 'echo "🐧  ARM64 Linux Distro by Wildan Hermawan"' >> rootfs/init
         echo 'echo "📱  GitHub: https://github.com/sfiraz"' >> rootfs/init
         echo 'echo "🚀  Kernel: $(uname -r)"' >> rootfs/init
-        echo 'echo "💻  Alpine Linux with APK package manager"' >> rootfs/init
+        echo 'echo "💻  Alpine Linux + APK Package Manager"' >> rootfs/init
         echo 'echo "================================================"' >> rootfs/init
         echo 'echo ""' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Start SSH server if available' >> rootfs/init
         echo 'if [ -f /usr/sbin/sshd ]; then' >> rootfs/init
         echo '    /usr/sbin/sshd &' >> rootfs/init
         echo '    echo "🔐 SSH server started on port 22"' >> rootfs/init
         echo 'fi' >> rootfs/init
         echo '' >> rootfs/init
-        echo '# Start shell' >> rootfs/init
         echo 'exec /bin/bash' >> rootfs/init
+        
         chmod +x rootfs/init
 
-    - name: Create user profile and customization
+    - name: Create user customization
       run: |
-        # Create .bashrc with customizations
+        echo "🎨 Creating user customization..."
+        
+        # .bashrc untuk root
         echo '# Zen Unix Custom Bashrc' > rootfs/root/.bashrc
-        echo 'export PS1='"'"'\[\033[1;32m\]\u@zen-unix\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ '"'" >> rootfs/root/.bashrc
+        echo 'export PS1="\\[\\033[1;32m\\]\\u@zen-unix\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]$ "' >> rootfs/root/.bashrc
         echo '' >> rootfs/root/.bashrc
         echo '# Aliases' >> rootfs/root/.bashrc
-        echo "alias ls='ls --color=auto'" >> rootfs/root/.bashrc
-        echo "alias ll='ls -la'" >> rootfs/root/.bashrc
-        echo "alias la='ls -A'" >> rootfs/root/.bashrc
-        echo "alias grep='grep --color=auto'" >> rootfs/root/.bashrc
-        echo "alias cat='bat'" >> rootfs/root/.bashrc
-        echo "alias find='fd'" >> rootfs/root/.bashrc
-        echo "alias ..='cd ..'" >> rootfs/root/.bashrc
-        echo "alias ...='cd ../..'" >> rootfs/root/.bashrc
+        echo 'alias ls="ls --color=auto"' >> rootfs/root/.bashrc
+        echo 'alias ll="ls -la"' >> rootfs/root/.bashrc
+        echo 'alias la="ls -A"' >> rootfs/root/.bashrc
+        echo 'alias grep="grep --color=auto"' >> rootfs/root/.bashrc
+        echo 'alias cat="bat"' >> rootfs/root/.bashrc
+        echo 'alias find="fd"' >> rootfs/root/.bashrc
+        echo 'alias ..="cd .."' >> rootfs/root/.bashrc
+        echo 'alias ...="cd ../.."' >> rootfs/root/.bashrc
         echo '' >> rootfs/root/.bashrc
         echo '# Functions' >> rootfs/root/.bashrc
         echo 'zenfetch() {' >> rootfs/root/.bashrc
@@ -334,35 +295,35 @@ EOF
         echo '    echo "    ___    _   _   ___   _   _   ___"' >> rootfs/root/.bashrc
         echo '    echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/root/.bashrc
         echo '    echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/root/.bashrc
-        echo '    echo "     / /  | . ` |   / / | . ` || | | |"' >> rootfs/root/.bashrc
+        echo '    echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/root/.bashrc
         echo '    echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/root/.bashrc
         echo '    echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/root/.bashrc
         echo '    echo "================================================"' >> rootfs/root/.bashrc
         echo '    echo "🐧  ARM64 Linux by Wildan Hermawan"' >> rootfs/root/.bashrc
         echo '    echo "📱  GitHub: https://github.com/sfiraz"' >> rootfs/root/.bashrc
         echo '    echo "🚀  $(uname -srm)"' >> rootfs/root/.bashrc
-        echo '    echo "💻  Alpine Linux $(cat /etc/alpine-release 2>/dev/null || echo '"'"'Musl Linux'"'"')"' >> rootfs/root/.bashrc
+        echo '    echo "💻  Alpine Linux $(cat /etc/alpine-release 2>/dev/null || echo "Musl Linux")"' >> rootfs/root/.bashrc
         echo '    echo "================================================"' >> rootfs/root/.bashrc
         echo '}' >> rootfs/root/.bashrc
         echo '' >> rootfs/root/.bashrc
         echo '# Welcome message' >> rootfs/root/.bashrc
         echo 'zenfetch' >> rootfs/root/.bashrc
-        echo 'echo "Type '"'"'zenfetch'"'"' to show this info again"' >> rootfs/root/.bashrc
+        echo 'echo "Type '\''zenfetch'\'' to show this info again"' >> rootfs/root/.bashrc
         echo 'echo "Available tools: bash, curl, wget, nano, htop, git, tmux, go, etc."' >> rootfs/root/.bashrc
-
-        # Copy .bashrc to home directory
+        
+        # Copy ke home user
         cp rootfs/root/.bashrc rootfs/home/
-
-    - name: Create Go workspace and setup
-      run: |
+        
         # Setup Go environment
         mkdir -p rootfs/home/go/{bin,src,pkg}
         echo '' >> rootfs/root/.bashrc
         echo '# Go environment' >> rootfs/root/.bashrc
         echo 'export GOPATH=/home/go' >> rootfs/root/.bashrc
-        echo 'export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
+        echo 'export PATH=$PATH:/usr/bin/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
 
-        # Create sample Go program
+    - name: Create sample Go program
+      run: |
+        echo "🐹 Creating sample Go program..."
         mkdir -p rootfs/home/wildan/hello
         echo 'package main' > rootfs/home/wildan/hello/main.go
         echo '' >> rootfs/home/wildan/hello/main.go
@@ -372,11 +333,12 @@ EOF
         echo '    fmt.Println("🐧 Welcome to Zen Unix!")' >> rootfs/home/wildan/hello/main.go
         echo '    fmt.Println("📱 ARM64 Linux by Wildan Hermawan")' >> rootfs/home/wildan/hello/main.go
         echo '    fmt.Println("🚀 Powered by Go")' >> rootfs/home/wildan/hello/main.go
-        echo '    fmt.Printf("💻 Architecture: %s\n", "aarch64")' >> rootfs/home/wildan/hello/main.go
+        echo '    fmt.Printf("💻 Architecture: %s\\n", "aarch64")' >> rootfs/home/wildan/hello/main.go
         echo '}' >> rootfs/home/wildan/hello/main.go
 
-    - name: Create essential device nodes
+    - name: Create device nodes
       run: |
+        echo "⚙️ Creating device nodes..."
         sudo mknod rootfs/dev/console c 5 1
         sudo mknod rootfs/dev/null c 1 3
         sudo mknod rootfs/dev/zero c 1 5
@@ -385,6 +347,7 @@ EOF
 
     - name: Create bootable image
       run: |
+        echo "💾 Creating bootable image..."
         dd if=/dev/zero of=zen-unix.img bs=1M count=256
         mkfs.ext4 -F zen-unix.img
         mkdir -p mnt
@@ -392,25 +355,34 @@ EOF
         sudo cp -r rootfs/* mnt/
         sudo umount mnt
 
-    - name: Upload final image
+    - name: Upload final artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: zen-unix-complete
+        name: zen-unix-complete-system
         path: |
           zen-unix.img
           linux-6.6.9/arch/arm64/boot/Image
         retention-days: 7
 
-    - name: Show build success
+    - name: Show build summary
       run: |
-        echo "✅ Build completed successfully!"
-        echo "📦 Final artifacts: zen-unix.img + Kernel Image"
-        echo "🐧 Included packages:"
-        echo "   - Core: bash, musl, busybox, alpine-base"
-        echo "   - Tools: curl, wget, nano, htop, neofetch"
-        echo "   - Dev: git, go, build-base, cmake"
-        echo "   - CLI UX: tmux, tree, bat, ripgrep, fd, fzf, jq"
-        echo "   - Aesthetic: figlet, lolcat, cmatrix"
-        echo "   - Network: openssh, iproute2, dhcpcd"
+        echo "✅ ZEN UNIX BUILD COMPLETED SUCCESSFULLY!"
+        echo ""
+        echo "📦 FINAL ARTIFACTS:"
+        echo "   🖼️  zen-unix.img (RootFS with Alpine packages)"
+        echo "   ⚙️  Kernel Image (ARM64)"
+        echo ""
+        echo "🐧 INCLUDED PACKAGES:"
+        echo "   💻 Core: bash, musl, busybox, alpine-base"
+        echo "   🌐 Network: curl, wget, openssh, iproute2, dhcpcd"
+        echo "   🔧 Tools: nano, htop, neofetch, git, tmux"
+        echo "   🎨 CLI UX: tree, bat, ripgrep, fd, fzf, jq"
+        echo "   ✨ Aesthetic: figlet, lolcat, cmatrix"
+        echo "   🐹 Development: go, build-base, cmake, pkgconfig"
+        echo ""
+        echo "📊 BUILD INFO:"
         ls -lh zen-unix.img
         ls -lh linux-6.6.9/arch/arm64/boot/Image
+        echo ""
+        echo "🎉 Zen Unix by Wildan Hermawan is ready!"
+        echo "🌐 GitHub: https://github.com/sfiraz"
