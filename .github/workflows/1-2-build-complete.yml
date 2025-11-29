@@ -21,7 +21,7 @@ env:
 jobs:
   build-complete-system:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
     - name: Checkout repository
@@ -54,7 +54,7 @@ jobs:
       run: |
         mkdir -p sources build rootfs output
         mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/{bin,lib,local,share,include},var/{cache,log,lib},tmp,home,root,boot,mnt,opt,run}
-        mkdir -p rootfs/etc/apk
+        mkdir -p rootfs/usr/local/bin
 
     - name: Download source packages
       run: |
@@ -168,94 +168,87 @@ jobs:
         done
         cd ../..
 
-    - name: Setup Alpine APK package manager with fixed URLs
+    - name: Download and install static binaries
       run: |
-        echo "Setting up Alpine APK package manager with fixed URLs"
+        echo "Downloading static binaries for essential tools"
         
-        # Download APK tools static dengan URL yang valid
-        wget -O apk-tools-static.tar.gz http://dl-cdn.alpinelinux.org/alpine/latest-stable/main/aarch64/apk-tools-static-2.14.0-r0.apk || \
-        wget -O apk-tools-static.tar.gz http://dl-cdn.alpinelinux.org/alpine/v3.18/main/aarch64/apk-tools-static-2.12.11-r1.apk
+        # Download static binaries (jika tersedia)
+        mkdir -p rootfs/usr/local/bin
         
-        tar -xzf apk-tools-static.tar.gz
-        cp sbin/apk.static rootfs/sbin/ || cp usr/sbin/apk.static rootfs/sbin/
-        chmod +x rootfs/sbin/apk.static
+        # Download static bash
+        wget -O rootfs/bin/bash https://github.com/robxu9/bash-static/releases/download/5.1.008-1/bash-linux-aarch64 || echo "Bash download failed, using busybox ash"
         
-        mkdir -p rootfs/etc/apk
-        echo "http://dl-cdn.alpinelinux.org/alpine/latest-stable/main" > rootfs/etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/latest-stable/community" >> rootfs/etc/apk/repositories
+        # Download static curl (jika tersedia)
+        wget -O rootfs/usr/local/bin/curl https://github.com/moparisthebest/static-curl/releases/download/v7.88.1/curl-aarch64 || echo "Curl download failed"
         
-        mkdir -p rootfs/etc/apk/keys
-        wget -O alpine-keys.tar.gz http://dl-cdn.alpinelinux.org/alpine/latest-stable/main/aarch64/alpine-keys-2.4-r1.apk || \
-        wget -O alpine-keys.tar.gz http://dl-cdn.alpinelinux.org/alpine/v3.18/main/aarch64/alpine-keys-2.4-r1.apk
+        # Download static wget (jika tersedia)  
+        wget -O rootfs/usr/local/bin/wget https://github.com/moparisthebest/static-curl/releases/download/v7.88.1/wget-aarch64 || echo "Wget download failed"
         
-        tar -xzf alpine-keys.tar.gz
-        cp -r etc/apk/keys/* rootfs/etc/apk/keys/ 2>/dev/null || true
+        # Make binaries executable
+        chmod +x rootfs/bin/bash 2>/dev/null || true
+        chmod +x rootfs/usr/local/bin/curl 2>/dev/null || true
+        chmod +x rootfs/usr/local/bin/wget 2>/dev/null || true
 
-    - name: Install Alpine packages with fallback
+    - name: Build additional tools from source
       run: |
-        echo "Installing Alpine packages with fallback method"
+        echo "Building additional tools from source"
         
-        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-        chmod +x rootfs/usr/bin/qemu-aarch64-static
+        # Build nano from source
+        wget https://www.nano-editor.org/dist/v7/nano-7.2.tar.gz
+        tar xzf nano-7.2.tar.gz
+        cd nano-7.2
+        ./configure --host=aarch64-linux-gnu --enable-static --disable-nls --disable-utf8
+        make -j$(nproc)
+        cp src/nano ../rootfs/usr/local/bin/
+        cd ..
         
-        echo "nameserver 8.8.8.8" > rootfs/etc/resolv.conf
-        echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
+        # Build htop from source
+        wget https://github.com/htop-dev/htop/archive/refs/tags/3.2.2.tar.gz
+        tar xzf 3.2.2.tar.gz
+        cd htop-3.2.2
+        ./autogen.sh
+        ./configure --host=aarch64-linux-gnu --enable-static --disable-nls
+        make -j$(nproc)
+        cp htop ../rootfs/usr/local/bin/
+        cd ..
+        
+        # Build tree from source
+        wget http://mama.indstate.edu/users/ice/tree/src/tree-2.1.1.tgz
+        tar xzf tree-2.1.1.tgz
+        cd tree-2.1.1
+        make CC=aarch64-linux-gnu-gcc static
+        cp tree ../rootfs/usr/local/bin/
+        cd ..
+
+    - name: Create essential system files
+      run: |
+        echo "Creating essential system files"
+        
+        # Create passwd file
+        echo "root:x:0:0:root:/root:/bin/bash" > rootfs/etc/passwd
+        echo "wildan:x:1000:1000:Wildan Hermawan:/home/wildan:/bin/bash" >> rootfs/etc/passwd
+        
+        # Create group file
+        echo "root:x:0:" > rootfs/etc/group
+        echo "wildan:x:1000:" >> rootfs/etc/group
+        
+        # Create hosts file
+        echo "127.0.0.1 localhost" > rootfs/etc/hosts
+        echo "127.0.1.1 zen-unix" >> rootfs/etc/hosts
+        
+        # Create hostname
         echo "zen-unix" > rootfs/etc/hostname
         
+        # Create fstab
         echo "/dev/root / ext4 defaults 0 1" > rootfs/etc/fstab
         echo "proc /proc proc defaults 0 0" >> rootfs/etc/fstab
         echo "tmpfs /tmp tmpfs defaults 0 0" >> rootfs/etc/fstab
-        echo "sysfs /sys sysfs defaults 0 0" >> rootfs/etc/fstab
-        echo "devtmpfs /dev devtmpfs defaults 0 0" >> rootfs/etc/fstab
-
-        # Try to update and install alpine-base
-        sudo chroot rootfs /sbin/apk.static update || echo "APK update failed, continuing..."
-        sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base || echo "Alpine base installation failed"
-        
-        # Install essential packages individually dengan retry
-        for package in bash curl wget nano htop neofetch git openssh tmux tree; do
-          echo "Installing $package"
-          sudo chroot rootfs /sbin/apk add --no-cache $package || echo "Failed to install $package"
-        done
-        
-        # Install development tools
-        for package in go build-base cmake pkgconfig; do
-          echo "Installing $package"
-          sudo chroot rootfs /sbin/apk add --no-cache $package || echo "Failed to install $package"
-        done
-        
-        # Install system tools
-        for package in util-linux e2fsprogs kbd kmod iproute2 iputils dhcpcd openssh-server sudo; do
-          echo "Installing $package"
-          sudo chroot rootfs /sbin/apk add --no-cache $package || echo "Failed to install $package"
-        done
-        
-        rm rootfs/usr/bin/qemu-aarch64-static
-
-    - name: Install additional tools manually if APK failed
-      run: |
-        echo "Installing additional tools manually"
-        
-        # Download static binaries untuk tools yang penting
-        mkdir -p rootfs/usr/local/bin
-        
-        # Download static bash sebagai fallback
-        wget -O rootfs/bin/bash-static https://github.com/robxu9/bash-static/releases/download/5.1.008-1/bash-linux-aarch64
-        chmod +x rootfs/bin/bash-static
-        
-        # Download static curl
-        wget -O rootfs/usr/local/bin/curl https://github.com/moparisthebest/static-curl/releases/download/v7.88.1/curl-amd64
-        chmod +x rootfs/usr/local/bin/curl
-        
-        # Copy system binaries sebagai fallback
-        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-        chmod +x rootfs/usr/bin/qemu-aarch64-static
 
     - name: Create init script
       run: |
         echo "Creating init script"
         
-        echo '#!/bin/bash' > rootfs/init
+        echo '#!/bin/sh' > rootfs/init
         echo '' >> rootfs/init
         echo 'export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin' >> rootfs/init
         echo '' >> rootfs/init
@@ -269,13 +262,8 @@ jobs:
         echo 'mknod /dev/zero c 1 5 2>/dev/null || true' >> rootfs/init
         echo 'mknod /dev/random c 1 8 2>/dev/null || true' >> rootfs/init
         echo '' >> rootfs/init
-        echo 'mkdir -p /var/run/dhcpcd' >> rootfs/init
+        echo 'mkdir -p /var/run' >> rootfs/init
         echo 'ip link set lo up' >> rootfs/init
-        echo '' >> rootfs/init
-        echo 'if [ -f /usr/sbin/sshd ]; then' >> rootfs/init
-        echo '    /usr/sbin/sshd &' >> rootfs/init
-        echo '    echo "SSH server started"' >> rootfs/init
-        echo 'fi' >> rootfs/init
         echo '' >> rootfs/init
         echo 'clear' >> rootfs/init
         echo 'echo "================================================"' >> rootfs/init
@@ -290,11 +278,12 @@ jobs:
         echo 'echo "GitHub: https://github.com/sfiraz"' >> rootfs/init
         echo 'echo "Version: 1.0.0"' >> rootfs/init
         echo 'echo "Kernel: $(uname -r)"' >> rootfs/init
+        echo 'echo "Architecture: aarch64"' >> rootfs/init
         echo 'echo "================================================"' >> rootfs/init
         echo 'echo ""' >> rootfs/init
         echo '' >> rootfs/init
         echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/init
-        echo 'exec /bin/bash' >> rootfs/init
+        echo 'exec /bin/sh' >> rootfs/init
         
         chmod +x rootfs/init
 
@@ -302,51 +291,64 @@ jobs:
       run: |
         echo "Creating user environment"
         
-        echo '# Zen Unix Custom Bash Configuration' > rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/root/.bashrc
-        echo 'export TERM=xterm-256color' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo 'alias ls="ls --color=auto"' >> rootfs/root/.bashrc
-        echo 'alias ll="ls -la"' >> rootfs/root/.bashrc
-        echo 'alias la="ls -A"' >> rootfs/root/.bashrc
-        echo 'alias grep="grep --color=auto"' >> rootfs/root/.bashrc
-        echo 'alias ..="cd .."' >> rootfs/root/.bashrc
-        echo 'alias ...="cd ../.."' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo 'zenfetch() {' >> rootfs/root/.bashrc
-        echo '    clear' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '    echo "    ___    _   _   ___   _   _   ___"' >> rootfs/root/.bashrc
-        echo '    echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/root/.bashrc
-        echo '    echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/root/.bashrc
-        echo '    echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/root/.bashrc
-        echo '    echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/root/.bashrc
-        echo '    echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '    echo "ARM64 Linux by Wildan Hermawan"' >> rootfs/root/.bashrc
-        echo '    echo "GitHub: https://github.com/sfiraz"' >> rootfs/root/.bashrc
-        echo '    echo "$(uname -srm)"' >> rootfs/root/.bashrc
-        echo '    echo "================================================"' >> rootfs/root/.bashrc
-        echo '}' >> rootfs/root/.bashrc
-        echo '' >> rootfs/root/.bashrc
-        echo 'zenfetch' >> rootfs/root/.bashrc
-        echo 'echo "Type \"zenfetch\" to show this info again"' >> rootfs/root/.bashrc
-        echo 'echo "Available tools: bash, busybox, etc."' >> rootfs/root/.bashrc
+        echo '# Zen Unix Shell Configuration' > rootfs/root/.profile
+        echo '' >> rootfs/root/.profile
+        echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/root/.profile
+        echo 'export TERM=linux' >> rootfs/root/.profile
+        echo '' >> rootfs/root/.profile
+        echo 'alias ls="ls --color=auto"' >> rootfs/root/.profile
+        echo 'alias ll="ls -la"' >> rootfs/root/.profile
+        echo 'alias la="ls -A"' >> rootfs/root/.profile
+        echo 'alias grep="grep --color=auto"' >> rootfs/root/.profile
+        echo 'alias ..="cd .."' >> rootfs/root/.profile
+        echo 'alias ...="cd ../.."' >> rootfs/root/.profile
+        echo '' >> rootfs/root/.profile
+        echo 'zenfetch() {' >> rootfs/root/.profile
+        echo '    clear' >> rootfs/root/.profile
+        echo '    echo "================================================"' >> rootfs/root/.profile
+        echo '    echo "    ___    _   _   ___   _   _   ___"' >> rootfs/root/.profile
+        echo '    echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/root/.profile
+        echo '    echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/root/.profile
+        echo '    echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/root/.profile
+        echo '    echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/root/.profile
+        echo '    echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/root/.profile
+        echo '    echo "================================================"' >> rootfs/root/.profile
+        echo '    echo "ARM64 Linux by Wildan Hermawan"' >> rootfs/root/.profile
+        echo '    echo "GitHub: https://github.com/sfiraz"' >> rootfs/root/.profile
+        echo '    echo "$(uname -srm)"' >> rootfs/root/.profile
+        echo '    echo "================================================"' >> rootfs/root/.profile
+        echo '}' >> rootfs/root/.profile
+        echo '' >> rootfs/root/.profile
+        echo 'zenfetch' >> rootfs/root/.profile
+        echo 'echo "Type \"zenfetch\" to show this info again"' >> rootfs/root/.profile
+        echo 'echo "Available tools: busybox, nano, htop, tree"' >> rootfs/root/.profile
         
         mkdir -p rootfs/home/wildan
-        cp rootfs/root/.bashrc rootfs/home/wildan/
+        cp rootfs/root/.profile rootfs/home/wildan/
 
     - name: Create sample programs
       run: |
         echo "Creating sample programs"
-        mkdir -p rootfs/home/wildan/zen-hello
-        echo '#!/bin/sh' > rootfs/home/wildan/zen-hello/hello
-        echo 'echo "Welcome to Zen Unix!"' >> rootfs/home/wildan/zen-hello/hello
-        echo 'echo "ARM64 Linux by Wildan Hermawan"' >> rootfs/home/wildan/zen-hello/hello
-        echo 'echo "GitHub: https://github.com/sfiraz"' >> rootfs/home/wildan/zen-hello/hello
-        echo 'echo "Architecture: aarch64"' >> rootfs/home/wildan/zen-hello/hello
-        chmod +x rootfs/home/wildan/zen-hello/hello
+        
+        # Create welcome script
+        echo '#!/bin/sh' > rootfs/usr/local/bin/zen-welcome
+        echo 'echo "================================================"' >> rootfs/usr/local/bin/zen-welcome
+        echo 'echo "Welcome to Zen Unix"' >> rootfs/usr/local/bin/zen-welcome
+        echo 'echo "ARM64 Linux Distribution"' >> rootfs/usr/local/bin/zen-welcome
+        echo 'echo "By Wildan Hermawan"' >> rootfs/usr/local/bin/zen-welcome
+        echo 'echo "GitHub: https://github.com/sfiraz"' >> rootfs/usr/local/bin/zen-welcome
+        echo 'echo "================================================"' >> rootfs/usr/local/bin/zen-welcome
+        chmod +x rootfs/usr/local/bin/zen-welcome
+        
+        # Create system info script
+        echo '#!/bin/sh' > rootfs/usr/local/bin/zen-info
+        echo 'echo "System Information:"' >> rootfs/usr/local/bin/zen-info
+        echo 'echo "  Hostname: $(hostname)"' >> rootfs/usr/local/bin/zen-info
+        echo 'echo "  Kernel: $(uname -r)"' >> rootfs/usr/local/bin/zen-info
+        echo 'echo "  Architecture: $(uname -m)"' >> rootfs/usr/local/bin/zen-info
+        echo 'echo "  CPU: $(grep -c ^processor /proc/cpuinfo) cores"' >> rootfs/usr/local/bin/zen-info
+        echo 'echo "  Memory: $(free -h | grep Mem: | awk "{print $2}") total"' >> rootfs/usr/local/bin/zen-info
+        chmod +x rootfs/usr/local/bin/zen-info
 
     - name: Create device nodes
       run: |
@@ -360,7 +362,7 @@ jobs:
     - name: Create bootable image
       run: |
         echo "Creating bootable image"
-        dd if=/dev/zero of=zen-unix.img bs=1M count=256
+        dd if=/dev/zero of=zen-unix.img bs=1M count=128
         mkfs.ext4 -F zen-unix.img
         mkdir -p mnt
         sudo mount -o loop zen-unix.img mnt
@@ -368,6 +370,7 @@ jobs:
         sudo umount mnt
         
         cp linux-6.6.9/arch/arm64/boot/Image zen-kernel
+        echo "Bootable image created"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -383,14 +386,15 @@ jobs:
         echo "ZEN UNIX BUILD COMPLETED SUCCESSFULLY"
         echo ""
         echo "FINAL ARTIFACTS:"
-        echo "  zen-unix.img (256MB RootFS)"
+        echo "  zen-unix.img (128MB RootFS)"
         echo "  zen-kernel (ARM64 Kernel)"
         echo ""
         echo "INCLUDED COMPONENTS:"
         echo "  Core: Linux Kernel 6.6.9, musl libc, BusyBox"
-        echo "  Shell: Bash"
-        echo "  Tools: Basic Unix utilities"
+        echo "  Shell: BusyBox ash with custom profile"
+        echo "  Tools: nano, htop, tree (statically compiled)"
         echo "  Custom: Zen Unix branding by Wildan Hermawan"
+        echo "  Scripts: zen-welcome, zen-info"
         echo ""
         echo "BUILD INFO:"
         ls -lh zen-unix.img
@@ -400,6 +404,13 @@ jobs:
         echo "  qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 2G"
         echo "  -kernel zen-kernel -drive file=zen-unix.img,format=raw"
         echo "  -append \"console=ttyAMA0 root=/dev/vda rw init=/init\" -nographic"
+        echo ""
+        echo "FEATURES:"
+        echo "  - Bootable ARM64 system"
+        echo "  - Custom init script with branding"
+        echo "  - Essential command line tools"
+        echo "  - Static compilation (no dependencies)"
+        echo "  - Minimal and fast"
         echo ""
         echo "By Wildan Hermawan"
         echo "GitHub: https://github.com/sfiraz"
