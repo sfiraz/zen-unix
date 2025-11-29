@@ -35,10 +35,42 @@ jobs:
           qemu-system-aarch64 \
           qemu-user-static
 
-    - name: Download sources
+    - name: Download sources with retry and mirrors
       run: |
-        chmod +x scripts/download-sources.sh
-        ./scripts/download-sources.sh
+        mkdir -p sources
+        cd sources
+        
+        # Download Binutils dengan multiple mirrors dan retry
+        for mirror in "https://mirror.koddos.net/gnu/binutils/" "https://ftp.gnu.org/gnu/binutils/" "http://mirror.csclub.uwaterloo.ca/gnu/binutils/"; do
+          echo "Trying mirror: $mirror"
+          if wget --timeout=30 --tries=3 "${mirror}binutils-2.42.tar.xz"; then
+            echo "✅ Binutils downloaded successfully"
+            break
+          fi
+          echo "❌ Mirror failed, trying next..."
+        done
+        
+        # Download Linux kernel
+        wget --timeout=30 --tries=3 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz || \
+        wget --timeout=30 --tries=3 https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz
+        
+        # Download Musl
+        wget --timeout=30 --tries=3 https://musl.libc.org/releases/musl-1.2.4.tar.gz
+        
+        # Download BusyBox
+        wget --timeout=30 --tries=3 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+
+        # Verify downloads
+        ls -la
+        for file in *.tar.* *.bz2 *.gz; do
+          if [ -f "$file" ]; then
+            echo "✅ $file downloaded successfully"
+          else
+            echo "❌ $file failed to download"
+            exit 1
+          fi
+        done
+        cd ..
 
     # ========== PHASE 1: TOOLCHAIN ==========
     - name: Build Binutils
@@ -151,10 +183,18 @@ jobs:
         done
         cd ../..
 
-    - name: Setup Alpine APK package manager
+    - name: Setup Alpine APK package manager dengan mirror yang reliable
       run: |
-        # Download Alpine APK tools static
-        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
+        # Download Alpine APK tools static dengan retry
+        for mirror in "http://dl-cdn.alpinelinux.org/alpine/" "http://mirror.leaseweb.com/alpine/"; do
+          echo "Trying Alpine mirror: $mirror"
+          if wget --timeout=30 --tries=3 "${mirror}v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk"; then
+            echo "✅ APK tools downloaded successfully"
+            break
+          fi
+          echo "❌ Mirror failed, trying next..."
+        done
+        
         tar -xzf apk-tools-static-2.14.0-r2.apk
         cp sbin/apk.static rootfs/sbin/
         
@@ -163,12 +203,24 @@ jobs:
         mkdir -p rootfs/var/cache/apk
         mkdir -p rootfs/etc/apk/keys
         
-        # Setup APK repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > rootfs/etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> rootfs/etc/apk/repositories
+        # Setup APK repositories dengan multiple mirrors
+        cat > rootfs/etc/apk/repositories << EOF
+http://dl-cdn.alpinelinux.org/alpine/v3.19/main
+http://dl-cdn.alpinelinux.org/alpine/v3.19/community
+http://mirror.leaseweb.com/alpine/v3.19/main
+http://mirror.leaseweb.com/alpine/v3.19/community
+EOF
         
-        # Download Alpine keys
-        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
+        # Download Alpine keys dengan retry
+        for mirror in "http://dl-cdn.alpinelinux.org/alpine/" "http://mirror.leaseweb.com/alpine/"; do
+          echo "Trying keys mirror: $mirror"
+          if wget --timeout=30 --tries=3 "${mirror}v3.19/main/aarch64/alpine-keys-2.4-r1.apk"; then
+            echo "✅ Alpine keys downloaded successfully"
+            break
+          fi
+          echo "❌ Mirror failed, trying next..."
+        done
+        
         tar -xzf alpine-keys-2.4-r1.apk
         cp -r etc/apk/keys/* rootfs/etc/apk/keys/
 
@@ -180,12 +232,33 @@ jobs:
         
         # Setup basic files for Alpine
         echo "nameserver 8.8.8.8" > rootfs/etc/resolv.conf
+        echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
         echo "zen-unix" > rootfs/etc/hostname
         
-        # Chroot and install packages
-        sudo chroot rootfs /sbin/apk.static update
-        sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base
-        sudo chroot rootfs /sbin/apk.static add --no-cache \
+        # Chroot dan install packages dengan retry
+        max_retries=3
+        retry_count=0
+        
+        while [ $retry_count -lt $max_retries ]; do
+          echo "Attempt $((retry_count + 1)) to setup Alpine packages..."
+          if sudo chroot rootfs /sbin/apk.static update && \
+             sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base; then
+            echo "✅ Alpine base installed successfully"
+            break
+          else
+            retry_count=$((retry_count + 1))
+            echo "❌ Attempt $retry_count failed, retrying..."
+            sleep 5
+          fi
+        done
+        
+        if [ $retry_count -eq $max_retries ]; then
+          echo "❌ Failed to install Alpine base after $max_retries attempts"
+          exit 1
+        fi
+        
+        # Install packages utama
+        sudo chroot rootfs /sbin/apk add --no-cache \
           bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
           figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
           iproute2 iputils dhcpcd openssh-server
