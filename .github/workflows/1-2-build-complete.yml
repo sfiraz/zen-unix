@@ -21,7 +21,7 @@ env:
 jobs:
   build-complete-system:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
     - name: Checkout repository
@@ -29,7 +29,6 @@ jobs:
 
     - name: Setup build environment
       run: |
-        echo "Setting up build environment for Zen Unix"
         sudo apt-get update
         sudo apt-get install -y \
           gcc-aarch64-linux-gnu \
@@ -60,8 +59,6 @@ jobs:
     - name: Download source packages
       run: |
         cd sources
-        echo "Downloading source packages"
-        
         wget --timeout=60 --tries=3 https://mirror.koddos.net/gnu/binutils/binutils-2.42.tar.xz || \
         wget --timeout=60 --tries=3 https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
         
@@ -72,11 +69,9 @@ jobs:
         wget --timeout=60 --tries=3 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
         
         cd ..
-        echo "All sources downloaded"
 
     - name: Build Binutils
       run: |
-        echo "Building Binutils"
         tar xf sources/binutils-2.42.tar.xz
         cd binutils-2.42
         mkdir build && cd build
@@ -87,7 +82,6 @@ jobs:
 
     - name: Build Linux Kernel Headers
       run: |
-        echo "Building Kernel Headers"
         tar xf sources/linux-6.6.9.tar.xz
         cd linux-6.6.9
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
@@ -96,7 +90,6 @@ jobs:
 
     - name: Build Linux Kernel
       run: |
-        echo "Building Linux Kernel"
         cd linux-6.6.9
         
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
@@ -124,7 +117,6 @@ jobs:
 
     - name: Build musl libc
       run: |
-        echo "Building musl libc"
         tar xf sources/musl-1.2.4.tar.gz
         cd musl-1.2.4
         ./configure --prefix=/usr --target=aarch64-linux-gnu
@@ -133,9 +125,8 @@ jobs:
         cp -r install/usr/* ../rootfs/usr/
         cd ..
 
-    - name: Build BusyBox
+    - name: Build BusyBox Fixed
       run: |
-        echo "Building BusyBox"
         tar xf sources/busybox-1.36.1.tar.bz2
         cd busybox-1.36.1
         
@@ -144,7 +135,16 @@ jobs:
         sed -i 's/CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
         sed -i 's/CONFIG_FEATURE_IPV6=.*/# CONFIG_FEATURE_IPV6 is not set/' .config
         
-        yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig
+        sed -i 's/CONFIG_TC=.*/# CONFIG_TC is not set/' .config
+        sed -i 's/CONFIG_WATCHDOG=.*/# CONFIG_WATCHDOG is not set/' .config
+        sed -i 's/CONFIG_SLATTACH=.*/# CONFIG_SLATTACH is not set/' .config
+        sed -i 's/CONFIG_UDHCPD=.*/# CONFIG_UDHCPD is not set/' .config
+        sed -i 's/CONFIG_UDHCPC=.*/# CONFIG_UDHCPC is not set/' .config
+        sed -i 's/CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY=.*/# CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY is not set/' .config
+        sed -i 's/CONFIG_FEATURE_UDHCPD_BASE_IP_ON_MAC=.*/# CONFIG_FEATURE_UDHCPD_BASE_IP_ON_MAC is not set/' .config
+        sed -i 's/CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY=.*/# CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY is not set/' .config
+        
+        yes "n" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig
         time make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         
         cp busybox ../rootfs/bin/
@@ -153,7 +153,6 @@ jobs:
 
     - name: Setup BusyBox symlinks
       run: |
-        echo "Creating BusyBox symlinks"
         cd rootfs/bin
         for app in $(./busybox --list); do
           if [ ! -e "$app" ] && [ "$app" != "busybox" ]; then
@@ -164,8 +163,6 @@ jobs:
 
     - name: Setup Alpine APK package manager
       run: |
-        echo "Setting up Alpine APK package manager"
-        
         wget -O apk-tools-static.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
         tar -xzf apk-tools-static.apk
         cp sbin/apk.static rootfs/sbin/
@@ -179,13 +176,9 @@ jobs:
         wget -O alpine-keys.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
         tar -xzf alpine-keys.apk
         cp etc/apk/keys/* rootfs/etc/apk/keys/
-        
-        echo "APK setup completed"
 
     - name: Install Alpine packages
       run: |
-        echo "Installing Alpine packages"
-        
         cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
         chmod +x rootfs/usr/bin/qemu-aarch64-static
         
@@ -193,7 +186,6 @@ jobs:
         echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
         echo "zen-unix" > rootfs/etc/hostname
         
-        # FIX: Create fstab using echo instead of heredoc
         echo "/dev/root / ext4 defaults 0 1" > rootfs/etc/fstab
         echo "proc /proc proc defaults 0 0" >> rootfs/etc/fstab
         echo "tmpfs /tmp tmpfs defaults 0 0" >> rootfs/etc/fstab
@@ -203,21 +195,15 @@ jobs:
         sudo chroot rootfs /sbin/apk.static update
         sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base
         
-        echo "Installing main packages"
         sudo chroot rootfs /sbin/apk add --no-cache \
           bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
           figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
           iproute2 iputils dhcpcd openssh-server sudo
         
         rm rootfs/usr/bin/qemu-aarch64-static
-        
-        echo "Alpine packages installed"
 
     - name: Create init script
       run: |
-        echo "Creating init script"
-        
-        # Create init script using multiple echo commands
         echo '#!/bin/bash' > rootfs/init
         echo '' >> rootfs/init
         echo 'export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin' >> rootfs/init
@@ -261,12 +247,9 @@ jobs:
         echo 'exec /bin/bash' >> rootfs/init
         
         chmod +x rootfs/init
-        echo "Init script created"
 
     - name: Create user environment
       run: |
-        echo "Creating user environment"
-        
         echo '# Zen Unix Custom Bash Configuration' > rootfs/root/.bashrc
         echo '' >> rootfs/root/.bashrc
         echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/root/.bashrc
@@ -310,12 +293,9 @@ jobs:
         echo '# Go environment' >> rootfs/root/.bashrc
         echo 'export GOPATH=/home/go' >> rootfs/root/.bashrc
         echo 'export PATH=$PATH:/usr/bin/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
-        
-        echo "User environment configured"
 
     - name: Create sample Go program
       run: |
-        echo "Creating sample Go program"
         mkdir -p rootfs/home/wildan/zen-hello
         echo 'package main' > rootfs/home/wildan/zen-hello/main.go
         echo '' >> rootfs/home/wildan/zen-hello/main.go
@@ -327,22 +307,17 @@ jobs:
         echo '    fmt.Println("Powered by Go")' >> rootfs/home/wildan/zen-hello/main.go
         echo '    fmt.Printf("Architecture: %s\n", "aarch64")' >> rootfs/home/wildan/zen-hello/main.go
         echo '}' >> rootfs/home/wildan/zen-hello/main.go
-        
-        echo "Sample Go program created"
 
     - name: Create device nodes
       run: |
-        echo "Creating device nodes"
         sudo mknod rootfs/dev/console c 5 1
         sudo mknod rootfs/dev/null c 1 3
         sudo mknod rootfs/dev/zero c 1 5
         sudo mknod rootfs/dev/random c 1 8
         sudo mknod rootfs/dev/urandom c 1 9
-        echo "Device nodes created"
 
     - name: Create bootable image
       run: |
-        echo "Creating bootable image"
         dd if=/dev/zero of=zen-unix.img bs=1M count=256
         mkfs.ext4 -F zen-unix.img
         mkdir -p mnt
@@ -351,7 +326,6 @@ jobs:
         sudo umount mnt
         
         cp linux-6.6.9/arch/arm64/boot/Image zen-kernel
-        echo "Bootable image created"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
