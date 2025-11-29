@@ -1,4 +1,4 @@
-name: "[1+2] Build Complete Toolchain + Kernel RootFS"
+name: "[1+2] Build Complete Toolchain + Kernel RootFS + Alpine Packages"
 
 on:
   workflow_dispatch:
@@ -32,7 +32,8 @@ jobs:
           xz-utils \
           git \
           make \
-          qemu-system-aarch64
+          qemu-system-aarch64 \
+          qemu-user-static
 
     - name: Download sources
       run: |
@@ -136,7 +137,7 @@ jobs:
 
     - name: Create minimal rootfs
       run: |
-        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,tmp,home,wildan}
+        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/bin,usr/lib,usr/local,var/cache/apk,tmp,home,wildan,root,.config}
         cp busybox-1.36.1/busybox rootfs/bin/
         cp -r musl-1.2.4/install/usr/lib/* rootfs/usr/lib/
         
@@ -150,28 +151,163 @@ jobs:
         done
         cd ../..
 
-    - name: Create init script
+    - name: Setup Alpine APK package manager
       run: |
-        echo '#!/bin/sh' > rootfs/init
-        echo 'mount -t proc none /proc' >> rootfs/init
-        echo 'mount -t sysfs none /sys' >> rootfs/init
-        echo 'mount -t devtmpfs none /dev' >> rootfs/init
-        echo 'echo ""' >> rootfs/init
-        echo 'echo "🐧 Welcome to Zen Unix - Wildan Distro!"' >> rootfs/init
-        echo 'echo "📱 ARM64 Linux by Wildan Hermawan"' >> rootfs/init
-        echo 'echo "🚀 Kernel: $(uname -r)"' >> rootfs/init
-        echo 'echo ""' >> rootfs/init
-        echo 'exec /bin/sh' >> rootfs/init
+        # Download Alpine APK tools static
+        wget http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
+        tar -xzf apk-tools-static-2.14.0-r2.apk
+        cp sbin/apk.static rootfs/sbin/
+        
+        # Create APK directories
+        mkdir -p rootfs/etc/apk
+        mkdir -p rootfs/var/cache/apk
+        mkdir -p rootfs/etc/apk/keys
+        
+        # Setup APK repositories
+        cat > rootfs/etc/apk/repositories << EOF
+        http://dl-cdn.alpinelinux.org/alpine/v3.19/main
+        http://dl-cdn.alpinelinux.org/alpine/v3.19/community
+        EOF
+        
+        # Download and setup Alpine keys
+        wget -O rootfs/etc/apk/keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub \
+          http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
+        tar -xzf alpine-keys-2.4-r1.apk
+        cp etc/apk/keys/* rootfs/etc/apk/keys/
+
+    - name: Install Alpine packages using QEMU
+      run: |
+        # Copy QEMU static binary for chroot
+        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
+        
+        # Chroot and install packages
+        sudo chroot rootfs /sbin/apk.static update
+        sudo chroot rootfs /sbin/apk.static add --no-cache \
+          bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
+          figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
+          iproute2 iputils dhcpcd openssh-server
+        
+        # Remove QEMU binary after use
+        rm rootfs/usr/bin/qemu-aarch64-static
+
+    - name: Create custom init script with Alpine
+      run: |
+        cat > rootfs/init << 'EOF'
+#!/bin/bash
+# Zen Unix Init Script - by Wildan Hermawan
+
+# Mount filesystems
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+# Create device nodes if needed
+mknod /dev/console c 5 1 2>/dev/null || true
+mknod /dev/null c 1 3 2>/dev/null || true
+
+# Setup network
+mkdir -p /var/run/dhcpcd
+dhcpcd lo &
+
+# Display welcome message
+clear
+echo "================================================"
+figlet "Zen Unix" | lolcat
+echo "================================================"
+echo "🐧  ARM64 Linux Distro by Wildan Hermawan"
+echo "📱  GitHub: https://github.com/sfiraz"
+echo "🚀  Kernel: $(uname -r)"
+echo "💻  $(neofetch --stdout | head -1)"
+echo "================================================"
+echo ""
+
+# Start SSH server if available
+if [ -f /usr/sbin/sshd ]; then
+    /usr/sbin/sshd &
+    echo "🔐 SSH server started on port 22"
+fi
+
+# Start shell
+exec /bin/bash
+EOF
         chmod +x rootfs/init
+
+    - name: Create user profile and customization
+      run: |
+        # Create .bashrc with customizations
+        cat > rootfs/root/.bashrc << 'EOF'
+# Zen Unix Custom Bashrc
+export PS1='\[\033[1;32m\]\u@zen-unix\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ '
+
+# Aliases
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias la='ls -A'
+alias grep='grep --color=auto'
+alias cat='bat'
+alias find='fd'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Functions
+zenfetch() {
+    clear
+    echo "================================================"
+    figlet "Zen Unix" | lolcat
+    echo "================================================"
+    echo "🐧  ARM64 Linux by Wildan Hermawan"
+    echo "📱  GitHub: https://github.com/sfiraz"
+    echo "🚀  $(uname -srm)"
+    echo "💻  $(cat /etc/alpine-release 2>/dev/null || echo 'Musl Linux')"
+    echo "================================================"
+}
+
+# Welcome message
+zenfetch
+echo "Type 'zenfetch' to show this info again"
+echo "Available tools: bash, curl, wget, nano, htop, git, tmux, go, etc."
+EOF
+
+        # Copy .bashrc to home directory
+        cp rootfs/root/.bashrc rootfs/home/
+
+    - name: Create Go workspace and setup
+      run: |
+        # Setup Go environment
+        mkdir -p rootfs/home/go/{bin,src,pkg}
+        cat >> rootfs/root/.bashrc << 'EOF'
+
+# Go environment
+export GOPATH=/home/go
+export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+EOF
+
+        # Create sample Go program
+        mkdir -p rootfs/home/wildan/hello
+        cat > rootfs/home/wildan/hello/main.go << 'EOF'
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("🐧 Welcome to Zen Unix!")
+    fmt.Println("📱 ARM64 Linux by Wildan Hermawan")
+    fmt.Println("🚀 Powered by Go")
+    fmt.Printf("💻 Architecture: %s\n", "aarch64")
+}
+EOF
 
     - name: Create essential device nodes
       run: |
         sudo mknod rootfs/dev/console c 5 1
         sudo mknod rootfs/dev/null c 1 3
+        sudo mknod rootfs/dev/zero c 1 5
+        sudo mknod rootfs/dev/random c 1 8
+        sudo mknod rootfs/dev/urandom c 1 9
 
     - name: Create bootable image
       run: |
-        dd if=/dev/zero of=zen-unix.img bs=1M count=64
+        dd if=/dev/zero of=zen-unix.img bs=1M count=256
         mkfs.ext4 -F zen-unix.img
         mkdir -p mnt
         sudo mount -o loop zen-unix.img mnt
@@ -191,5 +327,12 @@ jobs:
       run: |
         echo "✅ Build completed successfully!"
         echo "📦 Final artifacts: zen-unix.img + Kernel Image"
+        echo "🐧 Included packages:"
+        echo "   - Core: bash, musl, busybox, apk"
+        echo "   - Tools: curl, wget, nano, htop, neofetch"
+        echo "   - Dev: git, go, build-base, cmake"
+        echo "   - CLI UX: tmux, tree, bat, ripgrep, fd, fzf, jq"
+        echo "   - Aesthetic: figlet, lolcat, cmatrix"
+        echo "   - Network: openssh, iproute2, dhcpcd"
         ls -lh zen-unix.img
         ls -lh linux-6.6.9/arch/arm64/boot/Image
