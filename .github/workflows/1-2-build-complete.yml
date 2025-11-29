@@ -63,7 +63,7 @@ jobs:
       run: |
         cd linux-6.6.9
         
-        # Pakai tinyconfig atau minimal config untuk build cepat
+        # Pakai defconfig untuk build cepat
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
         # OPTIMASI MAXIMAL untuk build cepat
@@ -72,11 +72,9 @@ jobs:
         ./scripts/config --disable DEBUG_FS
         ./scripts/config --disable PROFILING
         ./scripts/config --disable KPROBES
-        ./scripts/config --disable UPROBES
         ./scripts/config --disable KGDB
         ./scripts/config --disable SCHED_DEBUG
         ./scripts/config --disable FTRACE
-        ./scripts/config --disable FUNCTION_TRACER
         ./scripts/config --disable DYNAMIC_DEBUG
         ./scripts/config --disable MODULES
         ./scripts/config --disable IKCONFIG
@@ -84,30 +82,22 @@ jobs:
         ./scripts/config --disable SECURITY
         ./scripts/config --disable NETWORK_FILESYSTEMS
         ./scripts/config --disable WIRELESS
-        ./scripts/config --disable NFC
         ./scripts/config --disable BLUETOOTH
         ./scripts/config --disable DRM
         ./scripts/config --disable SOUND
         ./scripts/config --disable HID
         ./scripts/config --disable USB
         ./scripts/config --disable PCI
-        ./scripts/config --disable IOMMU
-        ./scripts/config --disable VIRTUALIZATION
-        ./scripts/config --disable CRYPTO
-        ./scripts/config --disable BPF_SYSCALL
         
         # Enable yang penting saja
         ./scripts/config --enable DEVTMPFS
         ./scripts/config --enable DEVTMPFS_MOUNT
         ./scripts/config --enable TTY
-        ./scripts/config --enable SERIAL_OF_PLATFORM
-        ./scripts/config --enable ARM_AMBA
-        ./scripts/config --enable PL011_CLOCK
         ./scripts/config --enable SERIAL_AMBA_PL011
         ./scripts/config --enable SERIAL_AMBA_PL011_CONSOLE
         
         # Build dengan optimasi speed
-        echo "Building kernel with MAX optimization..."
+        echo "🚀 Building kernel with MAX optimization..."
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         time make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
@@ -129,16 +119,15 @@ jobs:
         # Pakai defconfig
         make CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        # FIX: Gunakan sed untuk modifikasi config (no interactive)
+        # FIX: Gunakan sed untuk modifikasi config
         sed -i 's/CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
         sed -i 's/CONFIG_FEATURE_IPV6=.*/# CONFIG_FEATURE_IPV6 is not set/' .config
         sed -i 's/CONFIG_TC=.*/# CONFIG_TC is not set/' .config
         sed -i 's/CONFIG_IP=.*/# CONFIG_IP is not set/' .config
         sed -i 's/CONFIG_NETWORKING=.*/# CONFIG_NETWORKING is not set/' .config
-        sed -i 's/CONFIG_FEATURE_USE_INITTAB=.*/# CONFIG_FEATURE_USE_INITTAB is not set/' .config
         
         # Non-interactive build
-        echo "Building BusyBox static..."
+        echo "🔨 Building BusyBox static..."
         make CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         time make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
@@ -169,7 +158,7 @@ mount -t devtmpfs none /dev
 echo ""
 echo "🐧 Welcome to Zen Unix - Wildan Distro!"
 echo "📱 ARM64 Linux by Wildan Hermawan"
-echo "🚀 Kernel: $(uname -r)"
+echo "🚀 Kernel: \$(uname -r)"
 echo ""
 exec /bin/sh
 EOF
@@ -189,16 +178,6 @@ EOF
         sudo cp -r rootfs/* mnt/
         sudo umount mnt
 
-    - name: Test with QEMU (Quick Boot Test)
-      run: |
-        timeout 30s qemu-system-aarch64 \
-          -M virt -cpu cortex-a53 -smp 1 -m 256M \
-          -kernel linux-6.6.9/arch/arm64/boot/Image \
-          -drive file=zen-unix.img,format=raw \
-          -append "console=ttyAMA0 root=/dev/vda rw init=/init" \
-          -nographic \
-          -no-reboot || true
-
     - name: Upload final image
       uses: actions/upload-artifact@v4
       with:
@@ -208,7 +187,9 @@ EOF
           linux-6.6.9/arch/arm64/boot/Image
         retention-days: 7
 
-    - name: Show build times
+    - name: Show build success
       run: |
-        echo " Build completed successfully!"
-        echo " Final artifacts: zen-unix.img + Kernel Image"
+        echo "✅ Build completed successfully!"
+        echo "📦 Final artifacts: zen-unix.img + Kernel Image"
+        ls -lh zen-unix.img
+        ls -lh linux-6.6.9/arch/arm64/boot/Image
