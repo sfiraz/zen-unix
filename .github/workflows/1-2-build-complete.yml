@@ -1,4 +1,3 @@
-
 name: "Zen Unix Complete Build"
 
 on:
@@ -8,13 +7,7 @@ on:
         description: 'Zen Unix Version'
         required: true
         default: '1.0.0'
-      features:
-        description: 'Build Features'
-        required: true
-        default: 'full'
   push:
-    branches: [main, develop]
-  pull_request:
     branches: [main]
 
 env:
@@ -24,22 +17,19 @@ env:
   MUSL_VERSION: '1.2.4'
   BUSYBOX_VERSION: '1.36.1'
   BINUTILS_VERSION: '2.42'
-  ALPINE_VERSION: '3.19'
 
 jobs:
   build-complete-system:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: Setup build environment
       run: |
-        echo "Setting up build environment for Zen Unix $ZEN_VERSION"
+        echo "Setting up build environment for Zen Unix"
         sudo apt-get update
         sudo apt-get install -y \
           gcc-aarch64-linux-gnu \
@@ -58,311 +48,143 @@ jobs:
           git \
           make \
           cmake \
-          autoconf \
-          automake \
-          libtool \
-          pkg-config \
           qemu-system-aarch64 \
-          qemu-user-static \
-          dosfstools \
-          e2fsprogs \
-          parted \
-          udev \
-          file \
-          python3 \
-          python3-pip \
-          rsync \
-          cpio \
-          gzip \
-          bzip2 \
-          unzip \
-          zip \
-          patchelf \
-          genext2fs
+          qemu-user-static
 
     - name: Create directory structure
       run: |
-        mkdir -p {sources,build,rootfs,output,downloads}
-        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/{bin,lib,local,share,include},var/{cache,log,lib,run,spool},tmp,home,root,boot,mnt,media,opt,run}
-        mkdir -p rootfs/etc/{apk,profile.d,init.d,network,ssl,certs}
-        mkdir -p rootfs/var/cache/apk
-        mkdir -p rootfs/usr/share/zoneinfo
-        mkdir -p rootfs/run/{dhcpcd,sshd}
-        mkdir -p rootfs/home/{wildan,user}
+        mkdir -p sources build rootfs output
+        mkdir -p rootfs/{bin,dev,etc,proc,sys,usr/{bin,lib,local},var/{cache,log},tmp,home,root,boot,mnt,opt,run}
+        mkdir -p rootfs/etc/apk
 
     - name: Download source packages
       run: |
         cd sources
-        echo "Downloading source packages for Zen Unix"
-
-        download_with_retry() {
-          local url=$1
-          local output=$2
-          local max_retries=5
-          local retry_count=0
-          
-          while [ $retry_count -lt $max_retries ]; do
-            if wget --progress=dot:giga --timeout=120 --tries=1 -O "$output" "$url"; then
-              echo "Downloaded: $output"
-              return 0
-            fi
-            retry_count=$((retry_count + 1))
-            echo "Download failed, retry $retry_count/$max_retries: $url"
-            sleep 10
-          done
-          echo "Failed to download: $url"
-          return 1
-        }
-
-        download_with_retry "https://mirror.koddos.net/gnu/binutils/binutils-$BINUTILS_VERSION.tar.xz" "binutils-$BINUTILS_VERSION.tar.xz"
-        download_with_retry "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KERNEL_VERSION.tar.xz" "linux-$KERNEL_VERSION.tar.xz"
-        download_with_retry "https://musl.libc.org/releases/musl-$MUSL_VERSION.tar.gz" "musl-$MUSL_VERSION.tar.gz"
-        download_with_retry "https://busybox.net/downloads/busybox-$BUSYBOX_VERSION.tar.bz2" "busybox-$BUSYBOX_VERSION.tar.bz2"
-
-        echo "Verifying downloaded files"
-        for file in *; do
-          if [ -f "$file" ]; then
-            size=$(stat -c%s "$file")
-            if [ $size -gt 1000 ]; then
-              echo "Valid: $file - $size bytes"
-            else
-              echo "Invalid: $file - File too small or corrupted"
-              exit 1
-            fi
-          fi
-        done
+        echo "Downloading source packages"
+        
+        wget --timeout=60 --tries=3 https://mirror.koddos.net/gnu/binutils/binutils-2.42.tar.xz || \
+        wget --timeout=60 --tries=3 https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
+        
+        wget --timeout=60 --tries=3 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.9.tar.xz
+        
+        wget --timeout=60 --tries=3 https://musl.libc.org/releases/musl-1.2.4.tar.gz
+        
+        wget --timeout=60 --tries=3 https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+        
         cd ..
+        echo "All sources downloaded"
 
-    - name: Build Binutils cross-compiler
+    - name: Build Binutils
       run: |
-        echo "Building Binutils $BINUTILS_VERSION for $BUILD_ARCH"
-        tar xf sources/binutils-$BINUTILS_VERSION.tar.xz
-        cd binutils-$BINUTILS_VERSION
-        
+        echo "Building Binutils"
+        tar xf sources/binutils-2.42.tar.xz
+        cd binutils-2.42
         mkdir build && cd build
-        ../configure \
-          --target=$BUILD_ARCH-linux-gnu \
-          --prefix=/usr \
-          --disable-werror \
-          --disable-multilib \
-          --enable-plugins \
-          --enable-threads \
-          --enable-gold \
-          --enable-ld=default \
-          --enable-shared \
-          --disable-static
-        
-        make -j$(nproc) all
+        ../configure --target=aarch64-linux-gnu --prefix=/usr --disable-werror
+        make -j$(nproc)
         make DESTDIR=$PWD/install install
-        
-        sudo cp -r install/* /
         cd ../..
-        echo "Binutils build completed"
 
     - name: Build Linux Kernel Headers
       run: |
-        echo "Building Linux $KERNEL_VERSION headers"
-        tar xf sources/linux-$KERNEL_VERSION.tar.xz
-        cd linux-$KERNEL_VERSION
-        
-        make ARCH=arm64 CROSS_COMPILE=$BUILD_ARCH-linux-gnu- defconfig
-        make ARCH=arm64 CROSS_COMPILE=$BUILD_ARCH-linux-gnu- headers_install INSTALL_HDR_PATH=$PWD/headers
-        
-        sudo mkdir -p /usr/$BUILD_ARCH-linux-gnu/include
-        sudo cp -r headers/include/* /usr/$BUILD_ARCH-linux-gnu/include/
+        echo "Building Kernel Headers"
+        tar xf sources/linux-6.6.9.tar.xz
+        cd linux-6.6.9
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- headers_install
         cd ..
-        echo "Kernel headers installed"
 
-    - name: Build Linux Kernel with optimizations
+    - name: Build Linux Kernel
       run: |
-        echo "Building Linux Kernel $KERNEL_VERSION with optimizations"
-        cd linux-$KERNEL_VERSION
+        echo "Building Linux Kernel"
+        cd linux-6.6.9
         
-        make ARCH=arm64 CROSS_COMPILE=$BUILD_ARCH-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
-        echo "Applying kernel optimizations"
         ./scripts/config --disable DEBUG_INFO
         ./scripts/config --disable DEBUG_KERNEL
         ./scripts/config --disable DEBUG_FS
         ./scripts/config --disable PROFILING
         ./scripts/config --disable KPROBES
-        ./scripts/config --disable UPROBES
         ./scripts/config --disable KGDB
         ./scripts/config --disable SCHED_DEBUG
         ./scripts/config --disable FTRACE
-        ./scripts/config --disable FUNCTION_TRACER
         ./scripts/config --disable DYNAMIC_DEBUG
         ./scripts/config --disable MODULES
-        ./scripts/config --disable IKCONFIG
-        ./scripts/config --disable AUDIT
-        ./scripts/config --disable SECURITY
-        ./scripts/config --disable NETWORK_FILESYSTEMS
-        ./scripts/config --disable WIRELESS
-        ./scripts/config --disable NFC
-        ./scripts/config --disable BLUETOOTH
-        ./scripts/config --disable DRM
-        ./scripts/config --disable SOUND
-        ./scripts/config --disable HID
-        ./scripts/config --disable USB
-        ./scripts/config --disable PCI
-        ./scripts/config --disable IOMMU_SUPPORT
-        ./scripts/config --disable VIRTUALIZATION
-        ./scripts/config --disable CRYPTO_USER_API
-        ./scripts/config --disable CRYPTO_USER_API_AEAD
-        ./scripts/config --disable CRYPTO_USER_API_HASH
-        ./scripts/config --disable CRYPTO_USER_API_SKCIPHER
-        ./scripts/config --disable CRYPTO_USER_API_RNG
-        ./scripts/config --disable CRYPTO_USER_API_AKCIPHER
-        ./scripts/config --disable CRYPTO_USER_API_KPP
-        ./scripts/config --disable CRYPTO_STATS
-        ./scripts/config --disable BPF_SYSCALL
-        ./scripts/config --disable BPF_JIT_ALWAYS_ON
-        ./scripts/config --disable IPV6
-        ./scripts/config --disable WIREGUARD
-        ./scripts/config --disable NETFILTER
-        ./scripts/config --disable IP_NF_IPTABLES
-        ./scripts/config --disable IP_NF_FILTER
-        ./scripts/config --disable IP_NF_MANGLE
-        ./scripts/config --disable IP_NF_NAT
-        ./scripts/config --disable BRIDGE
-        ./scripts/config --disable VLAN_8021Q
-        ./scripts/config --disable NET_SCHED
-        ./scripts/config --disable NET_EMATCH
-        ./scripts/config --disable NET_CLS
-        ./scripts/config --disable NET_ACT
-        ./scripts/config --disable BONDING
-        ./scripts/config --disable TEAM
-        ./scripts/config --disable MACVLAN
-        ./scripts/config --disable IPVLAN
-        ./scripts/config --disable VXLAN
-        ./scripts/config --disable GENEVE
-        ./scripts/config --disable GTP
-        ./scripts/config --disable MACSEC
-        ./scripts/config --disable NET_L3_MASTER_DEV
-        ./scripts/config --disable NET_NS
-        ./scripts/config --disable MQ_IOSCHED_DEADLINE
-        ./scripts/config --disable MQ_IOSCHED_KYBER
-        ./scripts/config --disable IOSCHED_BFQ
-        ./scripts/config --disable CGROUP_BFQIO
-        ./scripts/config --disable BFQ_GROUP_IOSCHED
         
         ./scripts/config --enable DEVTMPFS
         ./scripts/config --enable DEVTMPFS_MOUNT
         ./scripts/config --enable TTY
         ./scripts/config --enable SERIAL_AMBA_PL011
         ./scripts/config --enable SERIAL_AMBA_PL011_CONSOLE
-        ./scripts/config --enable EXT4_FS
-        ./scripts/config --enable VFAT_FS
-        ./scripts/config --enable MSDOS_FS
-        ./scripts/config --enable FAT_FS
-        ./scripts/config --enable NLS_CODEPAGE_437
-        ./scripts/config --enable NLS_ISO8859_1
-        ./scripts/config --enable PROC_FS
-        ./scripts/config --enable SYSFS
-        ./scripts/config --enable TMPFS
-        ./scripts/config --enable RAMFS
-        ./scripts/config --enable BLK_DEV_INITRD
-        ./scripts/config --enable BLK_DEV_RAM
-        ./scripts/config --enable BLK_DEV_LOOP
-        ./scripts/config --enable EFI_PARTITION
-        ./scripts/config --enable EFI
-        ./scripts/config --enable EFI_STUB
-        ./scripts/config --enable EFI_RUNTIME_WRAPPERS
-        ./scripts/config --enable EFI_VARS
-        ./scripts/config --enable EFI_ESRT
-        ./scripts/config --enable EFI_CAPSULE_LOADER
         
-        make ARCH=arm64 CROSS_COMPILE=$BUILD_ARCH-linux-gnu- olddefconfig
-        
-        echo "Compiling kernel"
-        time make ARCH=arm64 CROSS_COMPILE=$BUILD_ARCH-linux-gnu- -j$(nproc)
-        
-        cp arch/arm64/boot/Image ../output/zen-kernel
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        time make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         cd ..
-        echo "Kernel build completed"
 
     - name: Build musl libc
       run: |
-        echo "Building musl libc $MUSL_VERSION"
-        tar xf sources/musl-$MUSL_VERSION.tar.gz
-        cd musl-$MUSL_VERSION
-        
-        ./configure \
-          --prefix=/usr \
-          --target=$BUILD_ARCH-linux-gnu \
-          --disable-shared \
-          --enable-static
-        
+        echo "Building musl libc"
+        tar xf sources/musl-1.2.4.tar.gz
+        cd musl-1.2.4
+        ./configure --prefix=/usr --target=aarch64-linux-gnu
         make -j$(nproc)
         make DESTDIR=$PWD/install install
-        
         cp -r install/usr/* ../rootfs/usr/
         cd ..
-        echo "musl libc installed"
 
-    - name: Build BusyBox static
+    - name: Build BusyBox
       run: |
-        echo "Building BusyBox $BUSYBOX_VERSION static"
-        tar xf sources/busybox-$BUSYBOX_VERSION.tar.bz2
-        cd busybox-$BUSYBOX_VERSION
+        echo "Building BusyBox"
+        tar xf sources/busybox-1.36.1.tar.bz2
+        cd busybox-1.36.1
         
-        make CROSS_COMPILE=$BUILD_ARCH-linux-gnu- defconfig
+        make CROSS_COMPILE=aarch64-linux-gnu- defconfig
         
         sed -i 's/CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
         sed -i 's/CONFIG_FEATURE_IPV6=.*/# CONFIG_FEATURE_IPV6 is not set/' .config
-        sed -i 's/CONFIG_INETD=.*/# CONFIG_INETD is not set/' .config
-        sed -i 's/CONFIG_TELNETD=.*/# CONFIG_TELNETD is not set/' .config
-        sed -i 's/CONFIG_FEATURE_TELNETD_STANDALONE=.*/# CONFIG_FEATURE_TELNETD_STANDALONE is not set/' .config
-        sed -i 's/CONFIG_FEATURE_HTTPD_CGI=.*/# CONFIG_FEATURE_HTTPD_CGI is not set/' .config
-        sed -i 's/CONFIG_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR=.*/# CONFIG_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR is not set/' .config
-        sed -i 's/CONFIG_HTTPD=.*/# CONFIG_HTTPD is not set/' .config
         
-        yes "" | make CROSS_COMPILE=$BUILD_ARCH-linux-gnu- oldconfig
-        
-        echo "Compiling BusyBox"
-        time make CROSS_COMPILE=$BUILD_ARCH-linux-gnu- -j$(nproc)
+        yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig
+        time make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
         
         cp busybox ../rootfs/bin/
         chmod +x ../rootfs/bin/busybox
         cd ..
-        echo "BusyBox build completed"
 
     - name: Setup BusyBox symlinks
       run: |
         echo "Creating BusyBox symlinks"
         cd rootfs/bin
-        
-        ./busybox --list | while read app; do
+        for app in $(./busybox --list); do
           if [ ! -e "$app" ] && [ "$app" != "busybox" ]; then
             ln -s busybox "$app"
           fi
         done
         cd ../..
-        echo "BusyBox symlinks created"
 
     - name: Setup Alpine APK package manager
       run: |
         echo "Setting up Alpine APK package manager"
         
-        wget -O apk-tools-static.apk http://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main/aarch64/apk-tools-static-2.14.0-r2.apk
+        wget -O apk-tools-static.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/apk-tools-static-2.14.0-r2.apk
         tar -xzf apk-tools-static.apk
         cp sbin/apk.static rootfs/sbin/
         chmod +x rootfs/sbin/apk.static
         
         mkdir -p rootfs/etc/apk
-        echo "http://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main" > rootfs/etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/community" >> rootfs/etc/apk/repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > rootfs/etc/apk/repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> rootfs/etc/apk/repositories
         
         mkdir -p rootfs/etc/apk/keys
-        wget -O alpine-keys.apk http://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main/aarch64/alpine-keys-2.4-r1.apk
+        wget -O alpine-keys.apk http://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64/alpine-keys-2.4-r1.apk
         tar -xzf alpine-keys.apk
         cp etc/apk/keys/* rootfs/etc/apk/keys/
         
         echo "APK setup completed"
 
-    - name: Install Alpine packages with QEMU
+    - name: Install Alpine packages
       run: |
-        echo "Installing Alpine packages with QEMU chroot"
+        echo "Installing Alpine packages"
         
         cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
         chmod +x rootfs/usr/bin/qemu-aarch64-static
@@ -371,585 +193,199 @@ jobs:
         echo "nameserver 1.1.1.1" >> rootfs/etc/resolv.conf
         echo "zen-unix" > rootfs/etc/hostname
         
-        cat > rootfs/etc/fstab << FSTAB
-/dev/root / ext4 defaults 0 1
-proc /proc proc defaults 0 0
-tmpfs /tmp tmpfs defaults 0 0
-sysfs /sys sysfs defaults 0 0
-devtmpfs /dev devtmpfs defaults 0 0
-FSTAB
+        # FIX: Create fstab using echo instead of heredoc
+        echo "/dev/root / ext4 defaults 0 1" > rootfs/etc/fstab
+        echo "proc /proc proc defaults 0 0" >> rootfs/etc/fstab
+        echo "tmpfs /tmp tmpfs defaults 0 0" >> rootfs/etc/fstab
+        echo "sysfs /sys sysfs defaults 0 0" >> rootfs/etc/fstab
+        echo "devtmpfs /dev devtmpfs defaults 0 0" >> rootfs/etc/fstab
 
         sudo chroot rootfs /sbin/apk.static update
         sudo chroot rootfs /sbin/apk.static add --no-cache alpine-base
         
         echo "Installing main packages"
         sudo chroot rootfs /sbin/apk add --no-cache \
-          bash bash-completion \
-          curl wget \
-          nano vim \
-          htop top \
-          neofetch \
-          git \
-          openssh openssh-client openssh-server \
-          tmux screen \
-          tree \
-          bat \
-          ripgrep \
-          fd \
-          fzf \
-          jq \
-          figlet \
-          lolcat \
-          cmatrix \
-          go \
-          build-base \
-          cmake \
-          pkgconfig \
-          util-linux \
-          e2fsprogs \
-          kbd \
-          kmod \
-          iproute2 \
-          iputils \
-          dhcpcd \
-          dropbear dropbear-scp \
-          sudo \
-          shadow \
-          file \
-          less \
-          man man-pages \
-          mandoc \
-          groff \
-          diffutils \
-          patch \
-          findutils \
-          which \
-          grep \
-          sed \
-          awk \
-          gawk \
-          tar \
-          gzip \
-          bzip2 \
-          xz \
-          zip \
-          unzip \
-          rsync \
-          ncurses \
-          ncurses-terminfo \
-          ncurses-libs \
-          readline \
-          libedit \
-          ca-certificates \
-          tzdata \
-          openssl \
-          libressl \
-          zlib \
-          libbz2 \
-          liblz4 \
-          liblzma \
-          zstd \
-          libgcc \
-          libstdc++ \
-          musl-dev \
-          linux-headers
-        
-        sudo chroot rootfs /sbin/apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing \
-          lsd \
-          bottom \
-          duf \
-          procs \
-          tokei \
-          hyperfine \
-          dust \
-          bandwhich
-        
-        sudo chroot rootfs /sbin/apk cache clean
+          bash curl wget nano htop neofetch git openssh tmux tree bat ripgrep fd fzf jq \
+          figlet lolcat cmatrix go build-base cmake pkgconfig util-linux e2fsprogs kbd kmod \
+          iproute2 iputils dhcpcd openssh-server sudo
         
         rm rootfs/usr/bin/qemu-aarch64-static
         
         echo "Alpine packages installed"
 
-    - name: Install additional development tools
+    - name: Create init script
       run: |
-        echo "Installing additional development tools"
+        echo "Creating init script"
         
-        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-        chmod +x rootfs/usr/bin/qemu-aarch64-static
+        # Create init script using multiple echo commands
+        echo '#!/bin/bash' > rootfs/init
+        echo '' >> rootfs/init
+        echo 'export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'mount -t proc none /proc' >> rootfs/init
+        echo 'mount -t sysfs none /sys' >> rootfs/init
+        echo 'mount -t devtmpfs none /dev' >> rootfs/init
+        echo 'mount -t tmpfs none /tmp' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'mknod /dev/console c 5 1 2>/dev/null || true' >> rootfs/init
+        echo 'mknod /dev/null c 1 3 2>/dev/null || true' >> rootfs/init
+        echo 'mknod /dev/zero c 1 5 2>/dev/null || true' >> rootfs/init
+        echo 'mknod /dev/random c 1 8 2>/dev/null || true' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'mkdir -p /var/run/dhcpcd' >> rootfs/init
+        echo 'ip link set lo up' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'if [ -f /usr/sbin/sshd ]; then' >> rootfs/init
+        echo '    /usr/sbin/sshd &' >> rootfs/init
+        echo '    echo "SSH server started"' >> rootfs/init
+        echo 'fi' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'clear' >> rootfs/init
+        echo 'echo "================================================"' >> rootfs/init
+        echo 'echo "    ___    _   _   ___   _   _   ___"' >> rootfs/init
+        echo 'echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/init
+        echo 'echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/init
+        echo 'echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/init
+        echo 'echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/init
+        echo 'echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/init
+        echo 'echo "================================================"' >> rootfs/init
+        echo 'echo "ARM64 Linux Distro by Wildan Hermawan"' >> rootfs/init
+        echo 'echo "GitHub: https://github.com/sfiraz"' >> rootfs/init
+        echo 'echo "Version: 1.0.0"' >> rootfs/init
+        echo 'echo "Kernel: $(uname -r)"' >> rootfs/init
+        echo 'echo "Packages: Alpine + APK"' >> rootfs/init
+        echo 'echo "================================================"' >> rootfs/init
+        echo 'echo ""' >> rootfs/init
+        echo '' >> rootfs/init
+        echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/init
+        echo 'exec /bin/bash' >> rootfs/init
         
-        sudo chroot rootfs /sbin/apk add --no-cache \
-          python3 python3-dev py3-pip \
-          nodejs npm \
-          rust cargo \
-          openjdk11-jre openjdk11-jdk \
-          perl \
-          php php-dev php-common \
-          lua lua-dev \
-          ruby ruby-dev \
-          sqlite sqlite-dev \
-          postgresql postgresql-dev \
-          mysql mysql-dev \
-          redis \
-          nginx \
-          apache2 \
-          lighttpd
-        
-        sudo chroot rootfs /sbin/apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing \
-          zig \
-          nim \
-          crystal \
-          vlang
-        
-        rm rootfs/usr/bin/qemu-aarch64-static
-        echo "Development tools installed"
-
-    - name: Create system initialization script
-      run: |
-        echo "Creating system initialization script"
-        
-        cat > rootfs/init << 'INITSCRIPT'
-#!/bin/bash
-
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
-
-echo "Mounting filesystems"
-mount -t proc none /proc
-mount -t sysfs none /sys
-mount -t devtmpfs none /dev
-mount -t tmpfs none /tmp
-mount -t tmpfs none /var/run
-mount -t tmpfs none /var/lock
-
-echo "Creating essential device nodes"
-mknod /dev/console c 5 1 2>/dev/null || true
-mknod /dev/null c 1 3 2>/dev/null || true
-mknod /dev/zero c 1 5 2>/dev/null || true
-mknod /dev/random c 1 8 2>/dev/null || true
-mknod /dev/urandom c 1 9 2>/dev/null || true
-
-echo "Setting up loopback network"
-ip link set lo up
-
-echo "Starting system services"
-mkdir -p /var/run/dhcpcd
-mkdir -p /var/run/sshd
-
-if [ -f /usr/sbin/sshd ]; then
-    /usr/sbin/sshd &
-    echo "SSH server started"
-fi
-
-if [ -f /usr/sbin/dropbear ]; then
-    /usr/sbin/dropbear -R -E &
-    echo "Dropbear SSH server started"
-fi
-
-if [ -f /usr/sbin/dhcpcd ]; then
-    /usr/sbin/dhcpcd &
-    echo "DHCP client started"
-fi
-
-echo "Setting up environment"
-export HOME=/root
-export USER=root
-export TERM=linux
-export PS1="[\\u@zen-unix:\\w]# "
-
-echo "Loading kernel modules"
-modprobe -q ext4 2>/dev/null || true
-modprobe -q vfat 2>/dev/null || true
-modprobe -q fuse 2>/dev/null || true
-
-echo "Running startup scripts"
-if [ -d /etc/init.d ]; then
-    for script in /etc/init.d/*; do
-        if [ -x "$script" ]; then
-            "$script" start 2>/dev/null || true
-        fi
-    done
-fi
-
-clear
-echo "================================================"
-echo "    ___    _   _   ___   _   _   ___"
-echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"
-echo "      ) | |  \\| |    ) ||  \\| || | | |"
-echo "     / /  | . \` |   / / | . \` || | | |"
-echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"
-echo "   |____| |_| \\_| |____||_| \\_| \\___/"
-echo "================================================"
-echo "  ARM64 Linux Distribution by Wildan Hermawan"
-echo "  GitHub: https://github.com/sfiraz"
-echo "  Version: $ZEN_VERSION"
-echo "  Kernel: $(uname -r)"
-echo "  Architecture: $(uname -m)"
-echo "================================================"
-echo ""
-
-if [ -f /home/wildan/zen-hello/hello ]; then
-    /home/wildan/zen-hello/hello
-    echo ""
-fi
-
-echo "System ready. Available commands:"
-echo "  zenfetch    - Show system information"
-echo "  zen-welcome - Show welcome message"
-echo "  apk update  - Update package database"
-echo "  apk add     - Install packages"
-echo ""
-
-exec /bin/bash
-INITSCRIPT
-
         chmod +x rootfs/init
         echo "Init script created"
 
-    - name: Create user environment configuration
+    - name: Create user environment
       run: |
-        echo "Creating user environment configuration"
+        echo "Creating user environment"
         
-        cat > rootfs/root/.bashrc << 'BASHRC'
-# Zen Unix Custom Bash Configuration
-
-export PS1="[\\u@zen-unix:\\w]# "
-export TERM=xterm-256color
-export EDITOR=nano
-export PAGER=less
-export HISTSIZE=1000
-export HISTFILESIZE=2000
-export HISTCONTROL=ignoreboth
-
-alias ls='ls --color=auto'
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
-alias lsd='lsd -al'
-alias grep='grep --color=auto'
-alias egrep='egrep --color=auto'
-alias fgrep='fgrep --color=auto'
-alias cat='bat'
-alias less='bat'
-alias more='bat'
-alias find='fd'
-alias ps='procs'
-alias top='htop'
-alias du='duf'
-alias df='duf'
-alias tree='tree -C'
-alias ..='cd ..'
-alias ...='cd ../..'
-alias ....='cd ../../..'
-alias .....='cd ../../../..'
-alias mkdir='mkdir -p'
-alias rm='rm -i'
-alias cp='cp -i'
-alias mv='mv -i'
-alias cls='clear'
-alias ports='netstat -tulpn'
-alias ip='ip -c'
-alias diff='diff --color=auto'
-
-alias g='git'
-alias gs='git status'
-alias ga='git add'
-alias gc='git commit'
-alias gcm='git commit -m'
-alias gp='git push'
-alias gpl='git pull'
-alias gco='git checkout'
-alias gb='git branch'
-alias gl='git log --oneline --graph --decorate'
-alias gd='git diff'
-
-alias gob='go build'
-alias gor='go run'
-alias got='go test'
-alias gof='go fmt'
-alias gov='go vet'
-
-alias py='python3'
-alias python='python3'
-alias pip='pip3'
-
-alias nv='nvim'
-alias vim='nvim'
-
-alias zenfetch='clear && echo "================================================" && echo "Zen Unix System Information" && echo "================================================" && echo "Hostname: $(hostname)" && echo "Kernel: $(uname -r)" && echo "Architecture: $(uname -m)" && echo "Distribution: $(cat /etc/alpine-release 2>/dev/null || echo Unknown)" && echo "Shell: $SHELL" && echo "CPU: $(grep -c ^processor /proc/cpuinfo) cores" && echo "Memory: $(free -h | grep Mem: | awk "{print $2}")" && echo "Storage: $(df -h / | tail -1 | awk "{print $4}") available" && echo "Uptime: $(uptime -p)" && echo "================================================"'
-
-alias zen-welcome='clear && echo "================================================" && echo "Welcome to Zen Unix" && echo "================================================" && echo "Minimal ARM64 Linux Distribution" && echo "Created by: Wildan Hermawan" && echo "GitHub: https://github.com/sfiraz" && echo "================================================"'
-
-zenfetch
-echo "Type 'zenfetch' for system information"
-echo "Type 'zen-welcome' for welcome message"
-echo "Use 'apk' command to manage packages"
-BASHRC
-
+        echo '# Zen Unix Custom Bash Configuration' > rootfs/root/.bashrc
+        echo '' >> rootfs/root/.bashrc
+        echo 'export PS1="[\\u@zen-unix:\\w]# "' >> rootfs/root/.bashrc
+        echo 'export TERM=xterm-256color' >> rootfs/root/.bashrc
+        echo '' >> rootfs/root/.bashrc
+        echo 'alias ls="ls --color=auto"' >> rootfs/root/.bashrc
+        echo 'alias ll="ls -la"' >> rootfs/root/.bashrc
+        echo 'alias la="ls -A"' >> rootfs/root/.bashrc
+        echo 'alias grep="grep --color=auto"' >> rootfs/root/.bashrc
+        echo 'alias cat="bat"' >> rootfs/root/.bashrc
+        echo 'alias find="fd"' >> rootfs/root/.bashrc
+        echo 'alias ..="cd .."' >> rootfs/root/.bashrc
+        echo 'alias ...="cd ../.."' >> rootfs/root/.bashrc
+        echo '' >> rootfs/root/.bashrc
+        echo 'zenfetch() {' >> rootfs/root/.bashrc
+        echo '    clear' >> rootfs/root/.bashrc
+        echo '    echo "================================================"' >> rootfs/root/.bashrc
+        echo '    echo "    ___    _   _   ___   _   _   ___"' >> rootfs/root/.bashrc
+        echo '    echo "   |__ \\  | \\ | | |__ \\ | \\ | | / _ \\"' >> rootfs/root/.bashrc
+        echo '    echo "      ) | |  \\| |    ) ||  \\| || | | |"' >> rootfs/root/.bashrc
+        echo '    echo "     / /  | . \` |   / / | . \` || | | |"' >> rootfs/root/.bashrc
+        echo '    echo "    / /_  | |\\  |  / /_ | |\\  || |_| |"' >> rootfs/root/.bashrc
+        echo '    echo "   |____| |_| \\_| |____||_| \\_| \\___/"' >> rootfs/root/.bashrc
+        echo '    echo "================================================"' >> rootfs/root/.bashrc
+        echo '    echo "ARM64 Linux by Wildan Hermawan"' >> rootfs/root/.bashrc
+        echo '    echo "GitHub: https://github.com/sfiraz"' >> rootfs/root/.bashrc
+        echo '    echo "$(uname -srm)"' >> rootfs/root/.bashrc
+        echo '    echo "Alpine Linux $(cat /etc/alpine-release 2>/dev/null || echo "Musl Linux")"' >> rootfs/root/.bashrc
+        echo '    echo "================================================"' >> rootfs/root/.bashrc
+        echo '}' >> rootfs/root/.bashrc
+        echo '' >> rootfs/root/.bashrc
+        echo 'zenfetch' >> rootfs/root/.bashrc
+        echo 'echo "Type \"zenfetch\" to show this info again"' >> rootfs/root/.bashrc
+        echo 'echo "Available tools: bash, curl, wget, nano, htop, git, tmux, go, etc."' >> rootfs/root/.bashrc
+        
+        mkdir -p rootfs/home/wildan
         cp rootfs/root/.bashrc rootfs/home/wildan/
-        cp rootfs/root/.bashrc rootfs/home/user/
         
-        mkdir -p rootfs/home/{wildan,user}/.config
+        mkdir -p rootfs/home/go/{bin,src,pkg}
+        echo '' >> rootfs/root/.bashrc
+        echo '# Go environment' >> rootfs/root/.bashrc
+        echo 'export GOPATH=/home/go' >> rootfs/root/.bashrc
+        echo 'export PATH=$PATH:/usr/bin/go/bin:$GOPATH/bin' >> rootfs/root/.bashrc
         
-        cat > rootfs/home/wildan/.profile << 'PROFILE'
-export HOME=/home/wildan
-export USER=wildan
-cd $HOME
-PROFILE
-
-        cat > rootfs/home/user/.profile << 'PROFILE'
-export HOME=/home/user
-export USER=user
-cd $HOME
-PROFILE
-
         echo "User environment configured"
 
-    - name: Setup Go development environment
+    - name: Create sample Go program
       run: |
-        echo "Setting up Go development environment"
+        echo "Creating sample Go program"
+        mkdir -p rootfs/home/wildan/zen-hello
+        echo 'package main' > rootfs/home/wildan/zen-hello/main.go
+        echo '' >> rootfs/home/wildan/zen-hello/main.go
+        echo 'import "fmt"' >> rootfs/home/wildan/zen-hello/main.go
+        echo '' >> rootfs/home/wildan/zen-hello/main.go
+        echo 'func main() {' >> rootfs/home/wildan/zen-hello/main.go
+        echo '    fmt.Println("Welcome to Zen Unix!")' >> rootfs/home/wildan/zen-hello/main.go
+        echo '    fmt.Println("ARM64 Linux by Wildan Hermawan")' >> rootfs/home/wildan/zen-hello/main.go
+        echo '    fmt.Println("Powered by Go")' >> rootfs/home/wildan/zen-hello/main.go
+        echo '    fmt.Printf("Architecture: %s\n", "aarch64")' >> rootfs/home/wildan/zen-hello/main.go
+        echo '}' >> rootfs/home/wildan/zen-hello/main.go
         
-        mkdir -p rootfs/home/{wildan,user}/go/{bin,src,pkg}
-        mkdir -p rootfs/home/{wildan,user}/.local/bin
-        
-        cat >> rootfs/root/.bashrc << 'GOCONFIG'
+        echo "Sample Go program created"
 
-export GOPATH=$HOME/go
-export GOROOT=/usr/lib/go
-export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/.local/bin
-export GO111MODULE=on
-export GOPROXY=https://proxy.golang.org,direct
-export GOSUMDB=sum.golang.org
-GOCONFIG
-
-        cp rootfs/root/.bashrc rootfs/home/wildan/
-        cp rootfs/root/.bashrc rootfs/home/user/
-        
-        cat > rootfs/home/wildan/zen-hello/main.go << 'GOCODE'
-package main
-
-import (
-    "fmt"
-    "runtime"
-    "time"
-    "os"
-    "os/exec"
-)
-
-func main() {
-    fmt.Println("================================================")
-    fmt.Println("Zen Unix - ARM64 Linux Distribution")
-    fmt.Println("================================================")
-    fmt.Printf("Version:    %s\n", "1.0.0")
-    fmt.Printf("Go Version: %s\n", runtime.Version())
-    fmt.Printf("OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
-    fmt.Printf("CPU Cores:  %d\n", runtime.NumCPU())
-    fmt.Printf("Time:       %s\n", time.Now().Format("2006-01-02 15:04:05"))
-    
-    hostname, err := os.Hostname()
-    if err == nil {
-        fmt.Printf("Hostname:   %s\n", hostname)
-    }
-    
-    if _, err := exec.LookPath("apk"); err == nil {
-        fmt.Println("Package Manager: Alpine APK")
-    }
-    
-    fmt.Println("================================================")
-    fmt.Println("Created by: Wildan Hermawan")
-    fmt.Println("GitHub:    https://github.com/sfiraz")
-    fmt.Println("================================================")
-}
-GOCODE
-
-        cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-        chmod +x rootfs/usr/bin/qemu-aarch64-static
-        
-        sudo chroot rootfs /usr/bin/go build -o /home/wildan/zen-hello/hello /home/wildan/zen-hello/main.go
-        
-        rm rootfs/usr/bin/qemu-aarch64-static
-        
-        echo "Go environment setup completed"
-
-    - name: Create system configuration files
+    - name: Create device nodes
       run: |
-        echo "Creating system configuration files"
-        
-        cat > rootfs/etc/hosts << 'HOSTS'
-127.0.0.1   localhost localhost.localdomain
-::1         localhost localhost.localdomain
-127.0.1.1   zen-unix
-HOSTS
-
-        cat > rootfs/etc/passwd << 'PASSWD'
-root:x:0:0:root:/root:/bin/bash
-wildan:x:1000:1000:Wildan Hermawan:/home/wildan:/bin/bash
-user:x:1001:1001:User:/home/user:/bin/bash
-PASSWD
-
-        cat > rootfs/etc/group << 'GROUP'
-root:x:0:
-wheel:x:10:root,wildan
-users:x:100:
-wildan:x:1000:
-user:x:1001:
-GROUP
-
-        cat > rootfs/etc/shadow << 'SHADOW'
-root::0:0:99999:7:::
-wildan::0:0:99999:7:::
-user::0:0:99999:7:::
-SHADOW
-
-        cat > rootfs/etc/shells << 'SHELLS'
-/bin/sh
-/bin/bash
-/usr/bin/bash
-SHELLS
-
-        cat > rootfs/etc/inputrc << 'INPUTRC'
-set bell-style none
-set completion-ignore-case on
-set show-all-if-ambiguous on
-INPUTRC
-
-        cat > rootfs/etc/sudoers << 'SUDOERS'
-root ALL=(ALL) ALL
-%wheel ALL=(ALL) ALL
-wildan ALL=(ALL) NOPASSWD: ALL
-SUDOERS
-
-        cat > rootfs/etc/ssh/sshd_config << 'SSHDCONFIG'
-Port 22
-Protocol 2
-HostKey /etc/ssh/ssh_host_rsa_key
-HostKey /etc/ssh/ssh_host_ecdsa_key
-HostKey /etc/ssh/ssh_host_ed25519_key
-PermitRootLogin yes
-PasswordAuthentication yes
-PermitEmptyPasswords yes
-ChallengeResponseAuthentication no
-UsePAM yes
-PrintMotd no
-Subsystem sftp /usr/lib/ssh/sftp-server
-SSHDCONFIG
-
-        cat > rootfs/etc/motd << 'MOTD'
-Welcome to Zen Unix - ARM64 Linux Distribution
-Created by Wildan Hermawan
-GitHub: https://github.com/sfiraz
-
-MOTD
-
-        echo "System configuration files created"
-
-    - name: Create essential device nodes
-      run: |
-        echo "Creating essential device nodes"
-        
+        echo "Creating device nodes"
         sudo mknod rootfs/dev/console c 5 1
         sudo mknod rootfs/dev/null c 1 3
         sudo mknod rootfs/dev/zero c 1 5
         sudo mknod rootfs/dev/random c 1 8
         sudo mknod rootfs/dev/urandom c 1 9
-        sudo mknod rootfs/dev/full c 1 7
-        sudo mknod rootfs/dev/tty c 5 0
-        sudo mknod rootfs/dev/ptmx c 5 2
-        
-        for i in 0 1 2 3 4 5 6 7; do
-            sudo mknod rootfs/dev/tty$i c 4 $i
-        done
-        
-        sudo mkdir -p rootfs/dev/pts
-        sudo mkdir -p rootfs/dev/shm
-        
         echo "Device nodes created"
 
-    - name: Set proper ownership and permissions
+    - name: Create bootable image
       run: |
-        echo "Setting ownership and permissions"
-        
-        sudo chown -R root:root rootfs/
-        sudo chown -R wildan:wildan rootfs/home/wildan/
-        sudo chown -R user:user rootfs/home/user/
-        
-        sudo chmod 755 rootfs/init
-        sudo chmod 644 rootfs/root/.bashrc
-        sudo chmod 644 rootfs/home/wildan/.bashrc
-        sudo chmod 644 rootfs/home/user/.bashrc
-        sudo chmod 755 rootfs/home/wildan/zen-hello/hello
-        
-        sudo chmod 600 rootfs/etc/shadow
-        sudo chmod 644 rootfs/etc/passwd
-        sudo chmod 644 rootfs/etc/group
-        sudo chmod 644 rootfs/etc/hosts
-        
-        echo "Permissions set"
-
-    - name: Create bootable disk image
-      run: |
-        echo "Creating bootable disk image"
-        
-        dd if=/dev/zero of=output/zen-unix.img bs=1M count=1024
-        mkfs.ext4 -F output/zen-unix.img
-        
+        echo "Creating bootable image"
+        dd if=/dev/zero of=zen-unix.img bs=1M count=256
+        mkfs.ext4 -F zen-unix.img
         mkdir -p mnt
-        sudo mount -o loop output/zen-unix.img mnt
-        sudo cp -ra rootfs/* mnt/
+        sudo mount -o loop zen-unix.img mnt
+        sudo cp -r rootfs/* mnt/
         sudo umount mnt
         
-        cp linux-$KERNEL_VERSION/arch/arm64/boot/Image output/zen-kernel
-        
+        cp linux-6.6.9/arch/arm64/boot/Image zen-kernel
         echo "Bootable image created"
 
-    - name: Create documentation
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: zen-unix-complete
+        path: |
+          zen-unix.img
+          zen-kernel
+        retention-days: 7
+
+    - name: Show build summary
       run: |
-        echo "Creating documentation"
-        
-        cat > output/README.md << 'README'
-# Zen Unix $ZEN_VERSION
-
-Minimal ARM64 Linux Distribution by Wildan Hermawan
-
-## Features
-
-- **Kernel**: Linux $KERNEL_VERSION (ARM64 optimized)
-- **Libc**: musl $MUSL_VERSION (static)
-- **Shell**: Bash + BusyBox $BUSYBOX_VERSION
-- **Package Manager**: Alpine APK
-- **Architecture**: AArch64 (ARM64)
-
-## Included Tools
-
-### Core System
-- bash, musl, busybox, alpine-base
-- util-linux, e2fsprogs, kbd, kmod
-
-### Development
-- Go programming language
-- build-base (gcc, make, binutils)
-- cmake, pkgconfig, git
-- Python3, Node.js, Rust, Java
-- PHP, Perl, Ruby, Lua
-
-### Network Tools
-- curl, wget, openssh, iproute2
-- dhcpcd, dropbear, iptables
-
-### CLI Productivity
-- nano, htop, neofetch, tmux
-- tree, bat, ripgrep, fd, fzf, jq
-- lsd, bottom, duf, procs, tokei
-
-### System Management
-- sudo, shadow, file, less
-- man pages, documentation
-
-## Quick Start
-
-### Boot with QEMU:
-```bash
-qemu-system-aarch64 \
-  -M virt -cpu cortex-a53 -smp 4 -m 2G \
-  -kernel zen-kernel \
-  -drive file=zen-unix.img,format=raw \
-  -append "console=ttyAMA0 root=/dev/vda rw init=/init" \
-  -nographic
+        echo "ZEN UNIX BUILD COMPLETED SUCCESSFULLY"
+        echo ""
+        echo "FINAL ARTIFACTS:"
+        echo "  zen-unix.img (256MB RootFS)"
+        echo "  zen-kernel (ARM64 Kernel)"
+        echo ""
+        echo "INCLUDED PACKAGES:"
+        echo "  Core: bash, musl, busybox, alpine-base"
+        echo "  Network: curl, wget, openssh, iproute2"
+        echo "  Tools: nano, htop, neofetch, git, tmux"
+        echo "  CLI UX: tree, bat, ripgrep, fd, fzf, jq"
+        echo "  Aesthetic: figlet, lolcat, cmatrix"
+        echo "  Development: go, build-base, cmake"
+        echo ""
+        echo "BUILD INFO:"
+        ls -lh zen-unix.img
+        ls -lh zen-kernel
+        echo ""
+        echo "QUICK START:"
+        echo "  qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 2G"
+        echo "  -kernel zen-kernel -drive file=zen-unix.img,format=raw"
+        echo "  -append \"console=ttyAMA0 root=/dev/vda rw init=/init\" -nographic"
+        echo ""
+        echo "By Wildan Hermawan"
+        echo "GitHub: https://github.com/sfiraz"
